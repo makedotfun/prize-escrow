@@ -1,0 +1,35 @@
+skip_local_validator = true
+
+[toolchain]
+anchor_version = "1.2.1"
+solana_version = "3.1.10"
+
+[features]
+resolution = true
+skip-lint = false
+
+[workspace]
+members = ["programs/prize_escrow"]
+# Every `anchor build` also writes the IDL here; chain/idl/prize_escrow.json is committed and is
+# what scripts/chain/codegen.ts renders the Kit client from.
+idls = "idl"
+
+[programs.localnet]
+prize_escrow = "sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd"
+
+[programs.devnet]
+prize_escrow = "sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "cargo test"
+
+# The program keypair lives in CHAIN_KEYS_DIR (never in the repository). Before a build the hook
+# copies it into target/deploy (a missing key only warns: the build itself does not need it);
+# before a deploy it must be there and match declare_id!, or the deploy stops.
+[hooks]
+pre-build = "node \"$(git rev-parse --show-toplevel)/scripts/chain/build.ts\" keypair"
+pre-deploy = "node \"$(git rev-parse --show-toplevel)/scripts/chain/build.ts\" keypair --require"

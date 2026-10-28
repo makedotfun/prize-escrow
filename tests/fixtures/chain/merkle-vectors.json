@@ -1,0 +1,723 @@
+{
+  "schema": "agent-fun/merkle-vectors/v1",
+  "about": "Merkle vectors for the prize escrow, written by tests/unit/chain-merkle.test.ts from server/chain/merkle.ts (regenerate: WRITE_MERKLE_VECTORS=1 node --test tests/unit/chain-merkle.test.ts). Every payout vector must verify with merkle.rs compute_leaf_hash and verify_proof; every payout_invalid vector must not. Addresses are base58 with their 32 bytes in *_hex; hashes are lowercase hex; amounts are decimal u64 strings.",
+  "hash": "keccak256 (Keccak-256, not NIST SHA3-256): keccak256(\"\") = c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+  "payout_leaf": "keccak256(0x00 || keccak256(escrow[32] || claimant[32] || u64le(amount)))",
+  "entry_leaf": "keccak256(0x01 || keccak256(submission_id[16] || wallet[32] || transcripts_sha256[32] || sha256(entry_signature[64])))",
+  "pair": "keccak256(min(a, b) || max(a, b)), bytes compared lexicographically",
+  "tree": "the leaves sorted by hash, then paired left to right level by level, an odd last node moving up unpaired; a proof lists the siblings from the leaf up; no leaves give the all-zero root",
+  "payout": [
+    {
+      "name": "one leaf: the root is the leaf, the proof empty",
+      "escrow": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+      "escrow_hex": "0707070707070707070707070707070707070707070707070707070707070707",
+      "root": "e2ed8ea707e61948e562877a54f62ac1847c47fa9a8264de85b80d1095a5309b",
+      "leaves": [
+        {
+          "claimant": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+          "claimant_hex": "0101010101010101010101010101010101010101010101010101010101010101",
+          "amount": "1000",
+          "leaf": "e2ed8ea707e61948e562877a54f62ac1847c47fa9a8264de85b80d1095a5309b",
+          "proof": []
+        }
+      ]
+    },
+    {
+      "name": "two leaves",
+      "escrow": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+      "escrow_hex": "0707070707070707070707070707070707070707070707070707070707070707",
+      "root": "9a00a4c2113f0c3ed1526574e48f444de700e52e5536f535a3d0012630545621",
+      "leaves": [
+        {
+          "claimant": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+          "claimant_hex": "0101010101010101010101010101010101010101010101010101010101010101",
+          "amount": "1000",
+          "leaf": "e2ed8ea707e61948e562877a54f62ac1847c47fa9a8264de85b80d1095a5309b",
+          "proof": [
+            "4850d94b8bf213b59816589f62e671ca6497b8f4533f3a3f39c653e93acfbd9e"
+          ]
+        },
+        {
+          "claimant": "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR",
+          "claimant_hex": "0202020202020202020202020202020202020202020202020202020202020202",
+          "amount": "2000",
+          "leaf": "4850d94b8bf213b59816589f62e671ca6497b8f4533f3a3f39c653e93acfbd9e",
+          "proof": [
+            "e2ed8ea707e61948e562877a54f62ac1847c47fa9a8264de85b80d1095a5309b"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "three leaves: the odd node moves up unpaired; amounts 1 and u64::MAX",
+      "escrow": "21NNNAd5NQjZWKkzka3rqfQx8pssnKztyNss6Dq5Uog7",
+      "escrow_hex": "0ef3d9243978481be8ce9eb0757591be8fad891e99977f8604bb83d1d9b0f34c",
+      "root": "34bf3dd1b20e070b50e4b9428eba0c58214356a335cb60df035de4263219c8f1",
+      "leaves": [
+        {
+          "claimant": "31H7tk2z1H6NmygusXCcBbVA38mEBBJkBQZRt49aRntz",
+          "claimant_hex": "1dc99976f140b897b591937bc32c76d5fa8953740331955ddb02650096e7a92b",
+          "amount": "1",
+          "leaf": "a67a58e6bf256c7af110588cb4b9026a07e39c3f3e952a7e748aa1e652909416",
+          "proof": [
+            "f50326bd2e2cbf543e1ca8fcf7388ad454198e86a18e745e4614c60e8f2ad01b"
+          ]
+        },
+        {
+          "claimant": "Ec9LtERZ123PNR81fcT87xGvUSPuSgsnEa7EZt7fvej4",
+          "claimant_hex": "ca28b10d78885f28b7773927ae8f4e80eea27484966a5d11f43302e824071fe3",
+          "amount": "1000000",
+          "leaf": "7be07472c932e851dce1015314c694df7160a798533f3a75535994e4ee809fbd",
+          "proof": [
+            "026a5f1e896f236648e314b234d51cd7ba539708bc49b35feb82a9058d4bd5ac",
+            "a67a58e6bf256c7af110588cb4b9026a07e39c3f3e952a7e748aa1e652909416"
+          ]
+        },
+        {
+          "claimant": "JqCCaAfXwZQBLALbhaw7odAjSocDZsnWADmw7gac3S8",
+          "claimant_hex": "04915da90a5b9aef7a5b6d2000b19edd233e4332ea5d896db0eb05b72e8a6a61",
+          "amount": "18446744073709551615",
+          "leaf": "026a5f1e896f236648e314b234d51cd7ba539708bc49b35feb82a9058d4bd5ac",
+          "proof": [
+            "7be07472c932e851dce1015314c694df7160a798533f3a75535994e4ee809fbd",
+            "a67a58e6bf256c7af110588cb4b9026a07e39c3f3e952a7e748aa1e652909416"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "four leaves (claimant first byte i, amount 1000 * (i + 1))",
+      "escrow": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+      "escrow_hex": "0707070707070707070707070707070707070707070707070707070707070707",
+      "root": "b41e4e41c4e337b921135933ca7fa1967df2d4b154b462c6099cab1594abb120",
+      "leaves": [
+        {
+          "claimant": "11111111111111111111111111111111",
+          "claimant_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+          "amount": "1000",
+          "leaf": "d1f951f38d884770848c6bae7ada51b7e274fe698f5978bd68791b2083fdd0ff",
+          "proof": [
+            "bffa3659c83dc33b238f4911688c1206239ac4f15211fbae69fac7285558819f",
+            "ba148559765451e29b5d6ba59bc797876211b84749595d0c036f11a0588cb749"
+          ]
+        },
+        {
+          "claimant": "4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM",
+          "claimant_hex": "0100000000000000000000000000000000000000000000000000000000000000",
+          "amount": "2000",
+          "leaf": "3ddbd99ec09ffb6b376576a6c0d72fd2916116eafaef855c4db05e5cdd927819",
+          "proof": [
+            "9e33d12134c3ca50f07ca5f9b09a8160e1f9ce41c56043cda8ba752ad0d85502",
+            "dc057cedf1180d94fc706f41e7014477e3c9e415883e4fd6b0743ed11acf9893"
+          ]
+        },
+        {
+          "claimant": "8opHzTAnfzRpPEx21XtnrVTX28YQuCpAjcn1PczScKh",
+          "claimant_hex": "0200000000000000000000000000000000000000000000000000000000000000",
+          "amount": "3000",
+          "leaf": "9e33d12134c3ca50f07ca5f9b09a8160e1f9ce41c56043cda8ba752ad0d85502",
+          "proof": [
+            "3ddbd99ec09ffb6b376576a6c0d72fd2916116eafaef855c4db05e5cdd927819",
+            "dc057cedf1180d94fc706f41e7014477e3c9e415883e4fd6b0743ed11acf9893"
+          ]
+        },
+        {
+          "claimant": "CiDwVBFgWV9E5MvXWoLgnEgn2hK7rJikbvfWavzAQz3",
+          "claimant_hex": "0300000000000000000000000000000000000000000000000000000000000000",
+          "amount": "4000",
+          "leaf": "bffa3659c83dc33b238f4911688c1206239ac4f15211fbae69fac7285558819f",
+          "proof": [
+            "d1f951f38d884770848c6bae7ada51b7e274fe698f5978bd68791b2083fdd0ff",
+            "ba148559765451e29b5d6ba59bc797876211b84749595d0c036f11a0588cb749"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "five leaves",
+      "escrow": "5nZKb1qZi6yocZb1mjySa5b8U4smyawT82jthuKiQEF7",
+      "escrow_hex": "471a6dd0fb181c5c26dc45ded98cda5c6b5f4aa87d0b12c788999fb5c53e806e",
+      "root": "5d081d6aff04cc2de6c6b596184ad9b695fef864b278431e5f9ea4c8ad6918b2",
+      "leaves": [
+        {
+          "claimant": "Eue1URpjmW1cmUFex87zSfN4RpYrauPUF2LfjnEbQfWV",
+          "claimant_hex": "cea3fa34b7e9ef67dbec63ee8e5df76038e22125d4b8682e527158e64991931e",
+          "amount": "1000",
+          "leaf": "8e6c400f4e4a59b72711898de8e29947a0b436d018349886ff193b38632ce6f3",
+          "proof": [
+            "ad4beebd45ae0c1c6fdd9a9dfd40c40c6f261548e2da5df2b8f318ea7645f439",
+            "b53f780eeb7f0e12f555338c19dfcff53d5466a61f876a4020866db6772f1931",
+            "f5bd435d8ac85e8b33cf751dfe743ff3337acd78dc4925ea298cc216997130c0"
+          ]
+        },
+        {
+          "claimant": "GNRmE5ueyFebRFAxCoLR5vRBjuvkxG12DtUA2HaBbtV7",
+          "claimant_hex": "e45c7ffc6dcdc0a8ea65c3e8c0446ea58f59207411d57279f0253fb1f98efb9a",
+          "amount": "10000",
+          "leaf": "ad4beebd45ae0c1c6fdd9a9dfd40c40c6f261548e2da5df2b8f318ea7645f439",
+          "proof": [
+            "8e6c400f4e4a59b72711898de8e29947a0b436d018349886ff193b38632ce6f3",
+            "b53f780eeb7f0e12f555338c19dfcff53d5466a61f876a4020866db6772f1931",
+            "f5bd435d8ac85e8b33cf751dfe743ff3337acd78dc4925ea298cc216997130c0"
+          ]
+        },
+        {
+          "claimant": "FxTxAocbQ48AZ9fEAtoHBszQQrChK5eV3XBchmSmmUUT",
+          "claimant_hex": "de390907d7c235400e0f4f5ce52b45bebd9b3685ff5330bc273e15b811b1c944",
+          "amount": "100000",
+          "leaf": "1de9255c5d94bd9fad18b5ddb4e553f1ff6b95adba1e128dc426ce5b6779368a",
+          "proof": [
+            "8a4b3e2defad8d9d5a7c838328656aada89af377ca4906b372cd156edca49407",
+            "2c0aa986f657c4bb0da30c90c622c4fffc4ca6be15b7b2387f6be89c0e3688d9",
+            "f5bd435d8ac85e8b33cf751dfe743ff3337acd78dc4925ea298cc216997130c0"
+          ]
+        },
+        {
+          "claimant": "Enb36vHf45ADy8ewy92BMR6Av1cBx9Wo3KmGxn5LNj56",
+          "claimant_hex": "ccd58d25735573b8fd90972c88ddf0c8381706ea1029bc05a40b2648edff768d",
+          "amount": "1000000",
+          "leaf": "f5bd435d8ac85e8b33cf751dfe743ff3337acd78dc4925ea298cc216997130c0",
+          "proof": [
+            "59adb9c1790e8746ba0994aff74ccb8ffc309aab88a5b92de702e431e143a693"
+          ]
+        },
+        {
+          "claimant": "5E71yKBGC99LLs1tmzy6b8SWVDMHaynBuivkCm5RuZHK",
+          "claimant_hex": "3eca19f394c7a3588a1fb7509fbc6d5ce906b06581fe276614e896eebb6b5fd2",
+          "amount": "10000000",
+          "leaf": "8a4b3e2defad8d9d5a7c838328656aada89af377ca4906b372cd156edca49407",
+          "proof": [
+            "1de9255c5d94bd9fad18b5ddb4e553f1ff6b95adba1e128dc426ce5b6779368a",
+            "2c0aa986f657c4bb0da30c90c622c4fffc4ca6be15b7b2387f6be89c0e3688d9",
+            "f5bd435d8ac85e8b33cf751dfe743ff3337acd78dc4925ea298cc216997130c0"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "seventeen leaves: odd levels twice",
+      "escrow": "4s5SR5uVZPaVgBZZCrRGtdet1GxmTp86EUC83aQwqek7",
+      "escrow_hex": "39671e9884bdd5c80411194c8b2e6ababd910c8104052f51554d6a06981dd678",
+      "root": "512439c0d0553d3929ebc01763d93679eb78df5ac3378a2e3cfb47596b583857",
+      "leaves": [
+        {
+          "claimant": "4BSXFshpCsTQZqmjuAJMHj4Jc8J5SHjZqJ1QM71s4vx4",
+          "claimant_hex": "2f3fb9ef329a7ec585125a576b8d6066c53ed8bdc5a27e2c104588469ed05305",
+          "amount": "123456789",
+          "leaf": "f109a154d14a387d209687bbc805fd802dd4fc0d31b60887e0030eb49a21b1b5",
+          "proof": [
+            "de693ef87652a16e5a50121918a982a114d06cfac96c4f444f73e7a91c32ae05",
+            "5522c9d5de4eab1d2ac117008855f00aba3448fe536744c98950a1b82862b5cb",
+            "9cf4988939271e2d615e0bdae820a39b6f4324a4c94218b6c2f24e0de48ff068",
+            "2f42eacc3cced852eaef84a0d0569feab477356b120896934f738f92953642d8",
+            "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15"
+          ]
+        },
+        {
+          "claimant": "RKTgRz1CWyGCRQZoN91b5dDZhzH5YrZQuPVDFrF9u1d",
+          "claimant_hex": "063acfec8d0cdd4fa4f20512256f51f0c3d3fecfbccf5a0f085c30435decacb4",
+          "amount": "246913578",
+          "leaf": "098512a69aebff1374229d8e652e539f8f637d940fd94b3a921bc49cfdc3f9ec",
+          "proof": [
+            "360910313d3f30c801b9daa2612c5ad827fabafd061f92ba5f77cc093d845572",
+            "0ce222ce6782c9fa29050a168779eda5a65de1253cfe3875b47ffb779edeffaa",
+            "43eaf2ca72e348e61cbf3ba8aca4c10ae660d37446e388f23c3986fc799b3022",
+            "58efa956f15343a2cd5c914f1c26df6f982634b301df9ed4980e88a90011a2e3",
+            "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15"
+          ]
+        },
+        {
+          "claimant": "ZiGwoR3NDbGkeExna8HxeCmY7PtJV339pRjRnNHbbtj",
+          "claimant_hex": "0861416dc08f13fe15eb61d63fcab3343c20128c2f8dbc6b14c2041e27120630",
+          "amount": "370370367",
+          "leaf": "752659087fea141aa6db8d09a59edaa0ec6819b6d17962e4136ae5bf6c96ca00",
+          "proof": [
+            "5412b3c3d61ef5f7ecd501fa7d1c384e6dbb4866f6d9f05fa16fea49a8992e0f",
+            "b265b9a84bd3da4f21119fd41ceb608fc682eff3671d2d47951e9dc12c6da2f4",
+            "72e0fdee01c1cf6ac12bab034af93c1e4948a6200d01121c4e9439c5cf7354a6",
+            "58efa956f15343a2cd5c914f1c26df6f982634b301df9ed4980e88a90011a2e3",
+            "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15"
+          ]
+        },
+        {
+          "claimant": "G6eHTbC59meJmwWUXHUbnZ2bFTeq53g3CF8aF8RBQrdr",
+          "claimant_hex": "e0515d65775b9ceef47559fa8488039debb3f247c99f7dce897f9be1c934f535",
+          "amount": "493827156",
+          "leaf": "5412b3c3d61ef5f7ecd501fa7d1c384e6dbb4866f6d9f05fa16fea49a8992e0f",
+          "proof": [
+            "752659087fea141aa6db8d09a59edaa0ec6819b6d17962e4136ae5bf6c96ca00",
+            "b265b9a84bd3da4f21119fd41ceb608fc682eff3671d2d47951e9dc12c6da2f4",
+            "72e0fdee01c1cf6ac12bab034af93c1e4948a6200d01121c4e9439c5cf7354a6",
+            "58efa956f15343a2cd5c914f1c26df6f982634b301df9ed4980e88a90011a2e3",
+            "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15"
+          ]
+        },
+        {
+          "claimant": "28wtaHTLmksJKhbpctDM73bs9Mt6qEe7Y61sN2k8pGrX",
+          "claimant_hex": "10e4d0e61be7416a6969d778d127dab9f2f534a19c86ff0d842693607849dbbc",
+          "amount": "617283945",
+          "leaf": "360910313d3f30c801b9daa2612c5ad827fabafd061f92ba5f77cc093d845572",
+          "proof": [
+            "098512a69aebff1374229d8e652e539f8f637d940fd94b3a921bc49cfdc3f9ec",
+            "0ce222ce6782c9fa29050a168779eda5a65de1253cfe3875b47ffb779edeffaa",
+            "43eaf2ca72e348e61cbf3ba8aca4c10ae660d37446e388f23c3986fc799b3022",
+            "58efa956f15343a2cd5c914f1c26df6f982634b301df9ed4980e88a90011a2e3",
+            "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15"
+          ]
+        },
+        {
+          "claimant": "HHiSkRVVLeWyhY655ZSdUccyDbRPgxjbfNQDt5DFuVsT",
+          "claimant_hex": "f203250352028dd23c9bb87ccff262ccdd23d620398af83486ca18501a755c5e",
+          "amount": "740740734",
+          "leaf": "dc8fa867111bee1e075d47f5bde8942c7119124e50c6873a0759d6eb9fe18cd2",
+          "proof": [
+            "d1c1b5b28e99ec9db7653b8bf4a1bfb013c896f917ce1606ba395b73ac80c12a",
+            "8e21b751a32397f96b840c8bc6464ce06ca8f45a8eec75406911153fbc2de8e8",
+            "9cf4988939271e2d615e0bdae820a39b6f4324a4c94218b6c2f24e0de48ff068",
+            "2f42eacc3cced852eaef84a0d0569feab477356b120896934f738f92953642d8",
+            "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15"
+          ]
+        },
+        {
+          "claimant": "ANo5UMiz1tZHjdWJDkQ2ZW9TXKCvKNhy2YdCeCSDEiJm",
+          "claimant_hex": "8b4e7a971f138a443cf10cb8819ddb4dd1735481fc99e4e78f54e62d65574c72",
+          "amount": "864197523",
+          "leaf": "528b692b9441c2efa46b197d03359d0eb1407af0638d95d93f989b8e4d815a88",
+          "proof": [
+            "4dfd5aa386be3e192d31650b185d46973f731ba905302b61e406699460c448c2",
+            "87602ebc30be8b18940bc4ae3738e3d82493711421f49864867cc109e62a8fc3",
+            "72e0fdee01c1cf6ac12bab034af93c1e4948a6200d01121c4e9439c5cf7354a6",
+            "58efa956f15343a2cd5c914f1c26df6f982634b301df9ed4980e88a90011a2e3",
+            "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15"
+          ]
+        },
+        {
+          "claimant": "A8n16qeWXyXUfw2mFgxKf19LunJGHFrALtvAoZF4kA5z",
+          "claimant_hex": "87b721b234163544782b2ff9c1bd9e74b847259daa7153a0393d9699c6f51c0d",
+          "amount": "987654312",
+          "leaf": "4da52c990903f739216569d9b0b7a52b3f6ee8566dd75e29a304ccd0d7d72dd8",
+          "proof": [
+            "37bcdb69ec1df14dbd442b9e133fc1caadd7101075225445e2ff6679f5bd1d47",
+            "1529a1cfbf9cbe1cfc9d4b402cb902126e7e265b2120b6809f891471b2486af3",
+            "43eaf2ca72e348e61cbf3ba8aca4c10ae660d37446e388f23c3986fc799b3022",
+            "58efa956f15343a2cd5c914f1c26df6f982634b301df9ed4980e88a90011a2e3",
+            "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15"
+          ]
+        },
+        {
+          "claimant": "9bHpbFJc3ndqV9gm7SbHhXfUyZVpTjvfDeu2nzmBufkT",
+          "claimant_hex": "7fa6430f02b79f67dacc5331ae5a05f22b1ac62d8d1fda1c583110dd89c24130",
+          "amount": "1111111101",
+          "leaf": "de693ef87652a16e5a50121918a982a114d06cfac96c4f444f73e7a91c32ae05",
+          "proof": [
+            "f109a154d14a387d209687bbc805fd802dd4fc0d31b60887e0030eb49a21b1b5",
+            "5522c9d5de4eab1d2ac117008855f00aba3448fe536744c98950a1b82862b5cb",
+            "9cf4988939271e2d615e0bdae820a39b6f4324a4c94218b6c2f24e0de48ff068",
+            "2f42eacc3cced852eaef84a0d0569feab477356b120896934f738f92953642d8",
+            "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15"
+          ]
+        },
+        {
+          "claimant": "CQnxifvi1229BGXexVGByRF8btRcyhEKvkofo9YrunC2",
+          "claimant_hex": "a988e1f7b917c5910cc06c00ec7cd90548f6ecd5ea179a486b8041124ca87b63",
+          "amount": "1234567890",
+          "leaf": "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15",
+          "proof": [
+            "136af7da05d142df47bbaa32d1c7a3e599da03f628521cf7019621c0ec13997e"
+          ]
+        },
+        {
+          "claimant": "3GgNCbeKo3Q1PEVwa9Grw91i1Ju4WGnz7YC5iNHEBSDC",
+          "claimant_hex": "21bb98c2a732d8c29cffc1883ac9b18f954704eaaef7b7247064a00d55a02467",
+          "amount": "1358024679",
+          "leaf": "37bcdb69ec1df14dbd442b9e133fc1caadd7101075225445e2ff6679f5bd1d47",
+          "proof": [
+            "4da52c990903f739216569d9b0b7a52b3f6ee8566dd75e29a304ccd0d7d72dd8",
+            "1529a1cfbf9cbe1cfc9d4b402cb902126e7e265b2120b6809f891471b2486af3",
+            "43eaf2ca72e348e61cbf3ba8aca4c10ae660d37446e388f23c3986fc799b3022",
+            "58efa956f15343a2cd5c914f1c26df6f982634b301df9ed4980e88a90011a2e3",
+            "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15"
+          ]
+        },
+        {
+          "claimant": "4bux9ex7h5gKp5BX5texzSNkf2ye268scVRVt3zoZ8sZ",
+          "claimant_hex": "3584ae14ab01538ee37245d558dd11e5dddbbb10bbefd143a6fd0debd95cadf0",
+          "amount": "1481481468",
+          "leaf": "4dfd5aa386be3e192d31650b185d46973f731ba905302b61e406699460c448c2",
+          "proof": [
+            "528b692b9441c2efa46b197d03359d0eb1407af0638d95d93f989b8e4d815a88",
+            "87602ebc30be8b18940bc4ae3738e3d82493711421f49864867cc109e62a8fc3",
+            "72e0fdee01c1cf6ac12bab034af93c1e4948a6200d01121c4e9439c5cf7354a6",
+            "58efa956f15343a2cd5c914f1c26df6f982634b301df9ed4980e88a90011a2e3",
+            "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15"
+          ]
+        },
+        {
+          "claimant": "EJv1vU5vejy5g1Fce2QUSXhdKF5RHnzUrC5bt1dKgHnR",
+          "claimant_hex": "c5bebfc25767f790ee4c6ecff51faef896d6e28a2d3e8a700bfc7f1006c533c2",
+          "amount": "1604938257",
+          "leaf": "93fc42e891a3d187711d0515eeb8e331776520af3137014117f29c169f7fcaab",
+          "proof": [
+            "97acef3c318ce85dbccaa302ecfaa6c0a395fada096ce2342caf45628e6d6f2b",
+            "939560f0efaf56183ca4c588d17665983585fd05b54bf897de381dabbf323843",
+            "0e7d1a5c56ff28f72514a9a2a16b0f18b29c595b5a134b0dcb5b5a14e73184b6",
+            "2f42eacc3cced852eaef84a0d0569feab477356b120896934f738f92953642d8",
+            "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15"
+          ]
+        },
+        {
+          "claimant": "67kT8TAxD4JMYwHh6oFzPC36EBCHsgwwsoJcTS7QF2c2",
+          "claimant_hex": "4c050c92a8e04ec3aefeffac0a60f4456f5c8b75445ab24efd2400859c20e3b3",
+          "amount": "1728395046",
+          "leaf": "b2c96e6e1ca98d8e31645ecf9b5765e167b68ef47291cb17942462ccc996260f",
+          "proof": [
+            "c5250b6574c74a7999da68752ee89618e4d845b365935b9b45096b78ccac0fad",
+            "79d7b7116a88f0569d39e71e63576b4c2b8a6cd07d503f258790495e8d2a47d1",
+            "0e7d1a5c56ff28f72514a9a2a16b0f18b29c595b5a134b0dcb5b5a14e73184b6",
+            "2f42eacc3cced852eaef84a0d0569feab477356b120896934f738f92953642d8",
+            "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15"
+          ]
+        },
+        {
+          "claimant": "1RVd3hseosHKSB8P5yAw8BBdVkRWNcNMq2MKxygfn3V",
+          "claimant_hex": "001bb1e24ddbbf4f7c40517399f8d2984edfd7e7f855228c0a37263a23f99d04",
+          "amount": "1851851835",
+          "leaf": "c5250b6574c74a7999da68752ee89618e4d845b365935b9b45096b78ccac0fad",
+          "proof": [
+            "b2c96e6e1ca98d8e31645ecf9b5765e167b68ef47291cb17942462ccc996260f",
+            "79d7b7116a88f0569d39e71e63576b4c2b8a6cd07d503f258790495e8d2a47d1",
+            "0e7d1a5c56ff28f72514a9a2a16b0f18b29c595b5a134b0dcb5b5a14e73184b6",
+            "2f42eacc3cced852eaef84a0d0569feab477356b120896934f738f92953642d8",
+            "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15"
+          ]
+        },
+        {
+          "claimant": "DiiUbrgktLYuSZ8YR6Nbax3bDXXY2u2La3E7EDD72sKk",
+          "claimant_hex": "bcfbf405d6c8cb2088bd91c6a65a889c0b91ac08dccc0e5d23fc420ecdb64ccf",
+          "amount": "1975308624",
+          "leaf": "97acef3c318ce85dbccaa302ecfaa6c0a395fada096ce2342caf45628e6d6f2b",
+          "proof": [
+            "93fc42e891a3d187711d0515eeb8e331776520af3137014117f29c169f7fcaab",
+            "939560f0efaf56183ca4c588d17665983585fd05b54bf897de381dabbf323843",
+            "0e7d1a5c56ff28f72514a9a2a16b0f18b29c595b5a134b0dcb5b5a14e73184b6",
+            "2f42eacc3cced852eaef84a0d0569feab477356b120896934f738f92953642d8",
+            "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15"
+          ]
+        },
+        {
+          "claimant": "GRm5XcQZzg9Zv1rB1wQkfiFC149v1A6CNGj2cwK62HQs",
+          "claimant_hex": "e53715215775ebd531db06ab4737f6e5bd50c1a988509d4d7a5654b2a666f260",
+          "amount": "2098765413",
+          "leaf": "d1c1b5b28e99ec9db7653b8bf4a1bfb013c896f917ce1606ba395b73ac80c12a",
+          "proof": [
+            "dc8fa867111bee1e075d47f5bde8942c7119124e50c6873a0759d6eb9fe18cd2",
+            "8e21b751a32397f96b840c8bc6464ce06ca8f45a8eec75406911153fbc2de8e8",
+            "9cf4988939271e2d615e0bdae820a39b6f4324a4c94218b6c2f24e0de48ff068",
+            "2f42eacc3cced852eaef84a0d0569feab477356b120896934f738f92953642d8",
+            "fbe780c89e4ab91fb1cf7ece4b08589e5aaf62981907a9eb6e602875a6556b15"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "bot-01's prizes at 6 decimals, one wallet across two accounts (places 1 and 3 summed)",
+      "escrow": "FUS5cQbaWRibX76wLdCgMCY56NZHLSbzAsH9csCtyxoK",
+      "escrow_hex": "d70aa8024372def5cc9e9e3103505eaab6069cb3a85e5bb56fb7d1910baece0a",
+      "root": "a3b010541688487e485e943ad29b4b48f21403d7969dbc3a0ffe2c08ccec66c7",
+      "leaves": [
+        {
+          "claimant": "3WccxdND4Jfq5M8PYAH6vZimrftwGbtcwmPDQR1M54c8",
+          "claimant_hex": "254d7e32a835be79dd1e71797b42525c214cd7d800471f6c41a50628940d3cc1",
+          "amount": "1250000000",
+          "leaf": "24f2c194ca839c8074d9d5a40e9e29ae961ecfc4ca6137478976ee4195e72cd9",
+          "proof": [
+            "a921004e72af25569317115bdf7e29747c20eb97ff62d354524c69898a9e470c"
+          ]
+        },
+        {
+          "claimant": "6RsJrCZPby9GPohwg14wcgn8oqc7vTB4cWPucV46vUgn",
+          "claimant_hex": "50a941d687dd86b11ae4208770c37095f36348841bf28883e64b025c9f3f62c7",
+          "amount": "500000000",
+          "leaf": "a921004e72af25569317115bdf7e29747c20eb97ff62d354524c69898a9e470c",
+          "proof": [
+            "24f2c194ca839c8074d9d5a40e9e29ae961ecfc4ca6137478976ee4195e72cd9"
+          ]
+        }
+      ]
+    }
+  ],
+  "payout_invalid": [
+    {
+      "name": "the amount raised by one",
+      "escrow": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+      "escrow_hex": "0707070707070707070707070707070707070707070707070707070707070707",
+      "claimant": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+      "claimant_hex": "0101010101010101010101010101010101010101010101010101010101010101",
+      "amount": "1001",
+      "leaf": "016d9acac75592ad575e81e818dbdc46496a888e4314fc7e7bb79176c0bb69f9",
+      "proof": [
+        "4850d94b8bf213b59816589f62e671ca6497b8f4533f3a3f39c653e93acfbd9e"
+      ],
+      "root": "9a00a4c2113f0c3ed1526574e48f444de700e52e5536f535a3d0012630545621"
+    },
+    {
+      "name": "another claimant with the first leaf's proof",
+      "escrow": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+      "escrow_hex": "0707070707070707070707070707070707070707070707070707070707070707",
+      "claimant": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+      "claimant_hex": "0303030303030303030303030303030303030303030303030303030303030303",
+      "amount": "1000",
+      "leaf": "6b0a0619c6033d454c30aba124ef345c0092ca95cc07f5ed56ec5dd836798f4b",
+      "proof": [
+        "4850d94b8bf213b59816589f62e671ca6497b8f4533f3a3f39c653e93acfbd9e"
+      ],
+      "root": "9a00a4c2113f0c3ed1526574e48f444de700e52e5536f535a3d0012630545621"
+    },
+    {
+      "name": "the same claim replayed against another escrow",
+      "escrow": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+      "escrow_hex": "0808080808080808080808080808080808080808080808080808080808080808",
+      "claimant": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+      "claimant_hex": "0101010101010101010101010101010101010101010101010101010101010101",
+      "amount": "1000",
+      "leaf": "2bb58e74e11b3a3de645a153d71e2c1aa73f9b7d4b8060525b35344f0bcade3e",
+      "proof": [
+        "4850d94b8bf213b59816589f62e671ca6497b8f4533f3a3f39c653e93acfbd9e"
+      ],
+      "root": "9a00a4c2113f0c3ed1526574e48f444de700e52e5536f535a3d0012630545621"
+    },
+    {
+      "name": "a sibling dropped from the proof",
+      "escrow": "21NNNAd5NQjZWKkzka3rqfQx8pssnKztyNss6Dq5Uog7",
+      "escrow_hex": "0ef3d9243978481be8ce9eb0757591be8fad891e99977f8604bb83d1d9b0f34c",
+      "claimant": "31H7tk2z1H6NmygusXCcBbVA38mEBBJkBQZRt49aRntz",
+      "claimant_hex": "1dc99976f140b897b591937bc32c76d5fa8953740331955ddb02650096e7a92b",
+      "amount": "1",
+      "leaf": "a67a58e6bf256c7af110588cb4b9026a07e39c3f3e952a7e748aa1e652909416",
+      "proof": [],
+      "root": "34bf3dd1b20e070b50e4b9428eba0c58214356a335cb60df035de4263219c8f1"
+    },
+    {
+      "name": "another leaf's proof",
+      "escrow": "5nZKb1qZi6yocZb1mjySa5b8U4smyawT82jthuKiQEF7",
+      "escrow_hex": "471a6dd0fb181c5c26dc45ded98cda5c6b5f4aa87d0b12c788999fb5c53e806e",
+      "claimant": "Eue1URpjmW1cmUFex87zSfN4RpYrauPUF2LfjnEbQfWV",
+      "claimant_hex": "cea3fa34b7e9ef67dbec63ee8e5df76038e22125d4b8682e527158e64991931e",
+      "amount": "1000",
+      "leaf": "8e6c400f4e4a59b72711898de8e29947a0b436d018349886ff193b38632ce6f3",
+      "proof": [
+        "8e6c400f4e4a59b72711898de8e29947a0b436d018349886ff193b38632ce6f3",
+        "b53f780eeb7f0e12f555338c19dfcff53d5466a61f876a4020866db6772f1931",
+        "f5bd435d8ac85e8b33cf751dfe743ff3337acd78dc4925ea298cc216997130c0"
+      ],
+      "root": "5d081d6aff04cc2de6c6b596184ad9b695fef864b278431e5f9ea4c8ad6918b2"
+    },
+    {
+      "name": "another tree's root",
+      "escrow": "5nZKb1qZi6yocZb1mjySa5b8U4smyawT82jthuKiQEF7",
+      "escrow_hex": "471a6dd0fb181c5c26dc45ded98cda5c6b5f4aa87d0b12c788999fb5c53e806e",
+      "claimant": "FxTxAocbQ48AZ9fEAtoHBszQQrChK5eV3XBchmSmmUUT",
+      "claimant_hex": "de390907d7c235400e0f4f5ce52b45bebd9b3685ff5330bc273e15b811b1c944",
+      "amount": "100000",
+      "leaf": "1de9255c5d94bd9fad18b5ddb4e553f1ff6b95adba1e128dc426ce5b6779368a",
+      "proof": [
+        "8a4b3e2defad8d9d5a7c838328656aada89af377ca4906b372cd156edca49407",
+        "2c0aa986f657c4bb0da30c90c622c4fffc4ca6be15b7b2387f6be89c0e3688d9",
+        "f5bd435d8ac85e8b33cf751dfe743ff3337acd78dc4925ea298cc216997130c0"
+      ],
+      "root": "34bf3dd1b20e070b50e4b9428eba0c58214356a335cb60df035de4263219c8f1"
+    }
+  ],
+  "entries": [
+    {
+      "name": "one entry",
+      "root": "1b18c07095c16b67d895deb794da54e5d42743a11ef508ba991886485738a9fb",
+      "leaves": [
+        {
+          "submission_id": "0190f5c0-1000-7000-8000-4d298c94852c",
+          "submission_id_hex": "0190f5c01000700080004d298c94852c",
+          "wallet": "Crcptdr2KJV3dtANDuNFHRqr5Bnmkdv5YKCw1vNbKMxp",
+          "wallet_hex": "b0268629da3df93b1ac96b4d0cfeec9d73b275f27bed970360a72275abaa6bc5",
+          "transcripts_sha256": "a13f496202907f4d368aab84bc0e2aa2cb4be914626a27f57c406933fe798930",
+          "entry_signature": "53HnSRaqNL9TpFyQjhn1cbojvuvSdUmfLmHeqpLexwu2r5dryV1QWzdDGtBx3J9wig8TuheKVTqAKYq7WR7S3jNc",
+          "entry_signature_sha256": "caed85250c745a2644deb82b5ca2114a5af7fc633401341c0fd1f7c6a48e125d",
+          "leaf": "1b18c07095c16b67d895deb794da54e5d42743a11ef508ba991886485738a9fb",
+          "proof": []
+        }
+      ]
+    },
+    {
+      "name": "two entries",
+      "root": "bc57e95a791790faa4a82ba8a202259e73d608d8ee6d16f34fd6bcb00dbb12e9",
+      "leaves": [
+        {
+          "submission_id": "0190f5c0-1000-7000-8000-a5a4fcb4377e",
+          "submission_id_hex": "0190f5c0100070008000a5a4fcb4377e",
+          "wallet": "G6p6uCQpSDhtFvtA3taWrqW91zmNsPJ1XKS6irdboai",
+          "wallet_hex": "03de48ad7a1c6e9fa7b36c5bca8d54d4b9b3ce05790729d8518d7f860dfb010b",
+          "transcripts_sha256": "3d22bccd46890972e85542b8ce4c491ca4515ce1a89cf52c40b758be12015e03",
+          "entry_signature": "2Yucc2bPR88Qp84Nt1wfXNU9hvFmEwBUAgKEKZnqJyhrHNnYToS3UWs3r5yaE6vCf8k12UAEkmvCxaA4GQExWsAa",
+          "entry_signature_sha256": "c34f7c5c2329290c2c417dfc28eef469aedc36f753d3f3a18777151c82572043",
+          "leaf": "5717b4fde261ead2922a30af532291bc5dd628b8182d19178987b4bc58353531",
+          "proof": [
+            "de30bb4229f6dc02ed20d3c03679f3509635325a703e961c6ff2f92771c81375"
+          ]
+        },
+        {
+          "submission_id": "0190f5c0-1001-7000-8000-73eb78bec395",
+          "submission_id_hex": "0190f5c010017000800073eb78bec395",
+          "wallet": "dZC7ZVETLr7NMp5hjboQkkGAHErgXd1n7rT2tdD1Fi8",
+          "wallet_hex": "095d4eec25a82a8011f73b92a0dc214b0efadfb85c8c8db989cf6d683298c5c9",
+          "transcripts_sha256": "bfc91f42a5c1996cb0148a1d5359a2aba2d1ae6a457ba2f4013ba8a7f6fae81c",
+          "entry_signature": "4jqX7wWeD1mWBwmTBucdxZ4sKsWpcQM25999HHRcAU5YPx7AygLsd1DGiD2o4HcyoeSeQppUfp8Gf4GuP3RBoTKz",
+          "entry_signature_sha256": "b73cb15b26b7e1156cee1691ac9ae41bfb679464f70188a5758d0cbd91329451",
+          "leaf": "de30bb4229f6dc02ed20d3c03679f3509635325a703e961c6ff2f92771c81375",
+          "proof": [
+            "5717b4fde261ead2922a30af532291bc5dd628b8182d19178987b4bc58353531"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "three entries",
+      "root": "7a037c17b190e5f8b8216f4344937ce11cdb6264ae9131879e0ee89d73540e28",
+      "leaves": [
+        {
+          "submission_id": "0190f5c0-1000-7000-8000-e1d588a430ab",
+          "submission_id_hex": "0190f5c0100070008000e1d588a430ab",
+          "wallet": "vGthZtzjnMBW3Jmo7H9SxURsJVZh31H13QVwHe9qP3v",
+          "wallet_hex": "0da5c055d712f07f741f8a2ab10382909f3b83264d373e787ab1e44d6e4fe6e1",
+          "transcripts_sha256": "5bb4b6409a7d3209fec692fc06668130d3a5f8bd77608f29dc34234c2a1fba4d",
+          "entry_signature": "33og1rziHUYuoaxVAhavkkTAHZ3mTZmgzLpGxyKgzr8B76c7j6djah7CAMkmPQq9tXsJ3iJBeniEDYNEJw4p9ftm",
+          "entry_signature_sha256": "10077bd455a890b5b94a5f3b5cba9963e25bdec867f1104075f35ecd464426cb",
+          "leaf": "151eeba707a236c3f7b1333da5d24f647ae660693667d978908d515c77d002fb",
+          "proof": [
+            "5b45fb50c48cfc3914f7c816aac69ee58642a7a553fe816399c82ea5a755531f",
+            "f9cff08e3597d324ceaaee612c5dcf7f53e1a5011a124e51adaa24b49703e181"
+          ]
+        },
+        {
+          "submission_id": "0190f5c0-1001-7000-8000-51b1cff4e8ae",
+          "submission_id_hex": "0190f5c010017000800051b1cff4e8ae",
+          "wallet": "4g19U4bVRcNg5C8nCgFfEFj2wKCZj6v9eyAQ4NhrH2vb",
+          "wallet_hex": "3690e09c82594eaae1be0fefbc91b5e0a031e329a235b6d5f0d4e84828b2a898",
+          "transcripts_sha256": "7c67a769103fbd8bad4fe9b02ff83290651602bbaeef497d133239598e5dabff",
+          "entry_signature": "4hZBfpA7oRy9SdYw4GDGZF5YGPMrqrVj6CeKaT569pS2jo9PvvJ6CWJ1rPyTMzFtm5f7wULxYdTwsxNoJ9Abs7oo",
+          "entry_signature_sha256": "632e4e0848d5df04a8f011a047b0ba33ba37eba4dbbec970524d4e12d3bbc0f9",
+          "leaf": "f9cff08e3597d324ceaaee612c5dcf7f53e1a5011a124e51adaa24b49703e181",
+          "proof": [
+            "3ae8c8043e9a70241c5daee073dd57be55360ad58e8ad25f388af28dab546445"
+          ]
+        },
+        {
+          "submission_id": "0190f5c0-1002-7000-8000-30ebd4825217",
+          "submission_id_hex": "0190f5c010027000800030ebd4825217",
+          "wallet": "DNkFozXj8LioWP1kdEVnA4bB4YTFmUBCLVDqLgcibCLs",
+          "wallet_hex": "b7de595da480f86dd15c5c18e47719687611a4e578e6a565d516e5554c0ed60c",
+          "transcripts_sha256": "9af8c65160766222ab40af6d668275e532e3235e310b3fb65870ec9c6599cd0d",
+          "entry_signature": "sun2SRumixjxAzvqKRqZ883WTB8xdqizMkVJ32wCrqbbigYfwfniYdDsG5LtTT9oVdSB6LJfxvjvz7CwVbJMzBS",
+          "entry_signature_sha256": "c4c6309fc76d11d9171a1c47fcf81e60b331e894e4e464c76dc277f7dd62836a",
+          "leaf": "5b45fb50c48cfc3914f7c816aac69ee58642a7a553fe816399c82ea5a755531f",
+          "proof": [
+            "151eeba707a236c3f7b1333da5d24f647ae660693667d978908d515c77d002fb",
+            "f9cff08e3597d324ceaaee612c5dcf7f53e1a5011a124e51adaa24b49703e181"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "six entries",
+      "root": "1d43a8cffb8fece234dcc49b8a1ded27753e58a6f4e6dd760ead09bb73539fa5",
+      "leaves": [
+        {
+          "submission_id": "0190f5c0-1000-7000-8000-65537c222845",
+          "submission_id_hex": "0190f5c010007000800065537c222845",
+          "wallet": "GyfzW1fdhXKiB9ih32eXVd1rLRJ6Pn5T1ABsBoUCXtPh",
+          "wallet_hex": "ed63eab9fd89dc7a60d0b6cac9612414dc526412e51c872e3444f8505579ee10",
+          "transcripts_sha256": "ea9373970efd939ff1de6ebf202570c00216745e0b6afe92196941e5c364546f",
+          "entry_signature": "5whEinLB2tihL1KaKHY33nrXsPcFwoNNeyZQfPtHtpR8yyYJYt3B32C4WyDTnQGGuYfmP6Fc14TkNRj4pcnwvPjs",
+          "entry_signature_sha256": "5c4764f008c6d4c24eeb90281ad70643d31ad0c95aa69517cfed55854c1463f4",
+          "leaf": "f742f93409d66cdbfb2e58c7d21587a9a7869f4ce851558f946699a29b756242",
+          "proof": [
+            "f9d307c80ac9e42a3767b0d5f6c3d8e1d136fd524896e5bc0f9b6ba978bf236f",
+            "559d1909fc787de68e8b2fbe39fd88d61e17fe020d5337cf2ad93f3811fc13aa"
+          ]
+        },
+        {
+          "submission_id": "0190f5c0-1001-7000-8000-64052a0d6017",
+          "submission_id_hex": "0190f5c010017000800064052a0d6017",
+          "wallet": "Gq1GuUab99PcQKkDbdV3KSnW9otV8zQ7aEHjM6BC8f5z",
+          "wallet_hex": "eb2b7e27a1c887febe92ff66848b87f01de576c31a957a3f8553b699eadf6ac1",
+          "transcripts_sha256": "e063b5a6d558856631739f614d0747a80699b3b90b704b3e264ad7b1349d0507",
+          "entry_signature": "39P245noXZYW4nkzjEkyfQtK9dQpioRpStnxMesr7iMPuRcnZ9CBzgnv1v3mNzaFZ4Nf9Rw9Ygmtx5wAokDaWZ37",
+          "entry_signature_sha256": "1a6ab62bf35ee1220406ee4bbfa012643941ad1f65455bfdf459785e2486ae72",
+          "leaf": "dad740a26109396e221a482deb6d9cd26698a5983849c1f841e0c4db3144a40b",
+          "proof": [
+            "c99b3df7a3e4a42b100f486d7ab234b3a012b12d01cdbe7fd00836ba74809832",
+            "c879c6b1d5ade38b1455dbcd838dcf64435c884b70ac732f8a5c038fc1db3060",
+            "27a3741aedc053a991d6dad64e6c8d768535f44e9d39e3f4b0631a9c8668e5fc"
+          ]
+        },
+        {
+          "submission_id": "0190f5c0-1002-7000-8000-8cb045f18946",
+          "submission_id_hex": "0190f5c01002700080008cb045f18946",
+          "wallet": "96gVkE1zcrUvm9nA2esxbD2SfSwK2JzEiunW5tQm8PEs",
+          "wallet_hex": "78520eaa0c71f024d2e0313f617e5b79b2917bbdbfa75e192e5b1ccce31d6b34",
+          "transcripts_sha256": "b6751effcfab96af890727c4b76729877018cf61a1f825e7186c35ff4f99a9d0",
+          "entry_signature": "37pTGkZVRfi4kMZJTAbGuu8CSFhhsDwavNGA8usoAjfstbxw7sFmE5nU4FqHgKBL7G4YcUfUsE4wpZWcGTJ9WUFV",
+          "entry_signature_sha256": "5becc073ae68c805df16da6adce0700f416bd89d9c38ddc2b5571fb124d32bff",
+          "leaf": "0b02cfce3c5bb0c49ec2c1acb6be73b45b8740b4db6f2f0c96ef65f7286362b3",
+          "proof": [
+            "b7d928232393831d454283eb680ac3c2f9f64acfd12dd4a2ceb0cbecee54b35b",
+            "6a3da846832b344316068a644c8c09f0638f3fae0425ef32fed65daee3297867",
+            "27a3741aedc053a991d6dad64e6c8d768535f44e9d39e3f4b0631a9c8668e5fc"
+          ]
+        },
+        {
+          "submission_id": "0190f5c0-1003-7000-8000-f16192ac24ea",
+          "submission_id_hex": "0190f5c0100370008000f16192ac24ea",
+          "wallet": "6Ci7pvq24Hg9etN4afpdDxYWHKjvxAB4hYGxTBD6V9ND",
+          "wallet_hex": "4d4a50c1df199277d245babb8057c22fcc7f8149809d8043f27087b86cb3879e",
+          "transcripts_sha256": "ddad2fb1cbd0d35e49ca3ff1c56d810191acbfc0e375ad83b96a06e2f13e2304",
+          "entry_signature": "285xoyE5bxTACQYpZSrznMiX9MiDE9cpwQ9aJDskNVwcHorShEMcWbsgRjLsMhijmkDq5uXwVnatsf9AEHqU6Xzb",
+          "entry_signature_sha256": "8f5e1a85930c8c605a34e67d486e9837ab827e7c0757635b05843e2db42be134",
+          "leaf": "b7d928232393831d454283eb680ac3c2f9f64acfd12dd4a2ceb0cbecee54b35b",
+          "proof": [
+            "0b02cfce3c5bb0c49ec2c1acb6be73b45b8740b4db6f2f0c96ef65f7286362b3",
+            "6a3da846832b344316068a644c8c09f0638f3fae0425ef32fed65daee3297867",
+            "27a3741aedc053a991d6dad64e6c8d768535f44e9d39e3f4b0631a9c8668e5fc"
+          ]
+        },
+        {
+          "submission_id": "0190f5c0-1004-7000-8000-1d1c2cc96234",
+          "submission_id_hex": "0190f5c01004700080001d1c2cc96234",
+          "wallet": "5dTdJKMQzNPwnPTo3uUvG1yz1WMWziDkSXYDCw6dgc2f",
+          "wallet_hex": "44c5c34462ccc691a29e8252177020c6a1e37957ec189cb4593e45be59cf11c4",
+          "transcripts_sha256": "d3206906b1d916d315d67bf19059621d2256f416b7a9d19e5bad16953c2fd090",
+          "entry_signature": "5BumRCCBRrhcXnja8Twv5eQrN41TnGX8yUg2r5d2M3EhqCa9qUAk6cpVhtJFmxqXCFm9w37Z8YRsGoAyvjT3aCRp",
+          "entry_signature_sha256": "abc6856aa8f3e0b1553f9971332113493926d7f42af696205da0020fa92b2bb9",
+          "leaf": "c99b3df7a3e4a42b100f486d7ab234b3a012b12d01cdbe7fd00836ba74809832",
+          "proof": [
+            "dad740a26109396e221a482deb6d9cd26698a5983849c1f841e0c4db3144a40b",
+            "c879c6b1d5ade38b1455dbcd838dcf64435c884b70ac732f8a5c038fc1db3060",
+            "27a3741aedc053a991d6dad64e6c8d768535f44e9d39e3f4b0631a9c8668e5fc"
+          ]
+        },
+        {
+          "submission_id": "0190f5c0-1005-7000-8000-2bfaad2a16a5",
+          "submission_id_hex": "0190f5c01005700080002bfaad2a16a5",
+          "wallet": "44TF6M8u6ubnhXvck4KSzvsmLuxtmhULxzQhkWjxUdcp",
+          "wallet_hex": "2d7579e9ee3d32c79ab8d02d5f51456bdc05787ef65e2ecb89a55d298b6580d5",
+          "transcripts_sha256": "3ff6ec22c7f52a71b1b050a31cfe332287dbb0c9cb66c13c31e67ab6b04e3135",
+          "entry_signature": "2WrZbqxb5xMXHhyJ1PemoPtBnWLoNEsoAmWZNu7bLuHS5RimzdaxLtYTAzyM4qYTsz4yc2E3DnnY7g6UDx6uEmQD",
+          "entry_signature_sha256": "1f716c8307aa56d4a09fcd51b9ac9d1cfefa0a0ab0369ac7645d784f90ae8c5c",
+          "leaf": "f9d307c80ac9e42a3767b0d5f6c3d8e1d136fd524896e5bc0f9b6ba978bf236f",
+          "proof": [
+            "f742f93409d66cdbfb2e58c7d21587a9a7869f4ce851558f946699a29b756242",
+            "559d1909fc787de68e8b2fbe39fd88d61e17fe020d5337cf2ad93f3811fc13aa"
+          ]
+        }
+      ]
+    }
+  ]
+}

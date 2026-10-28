@@ -1,0 +1,649 @@
+//! The program's one Config account and the safeguards it carries: the open policy (allowlists,
+//! the regrader registry, floors), the caps and the claim flow bucket, the stop state and the
+//! revoked keys, and the stoppable escrow clock every deadline check reads.
+//!
+//! The clock. `escrow_now(escrow, config)` is wall time minus the seconds this escrow has been
+//! stopped, by a global PayoutStop or its own guardian freeze, counted once when both overlap:
+//! - G(t), the global stopped seconds up to wall time t: Config.stopped_secs (every PayoutStop
+//!   that ended) plus the part of the PayoutStop in force that has elapsed by t (a stop lapses at
+//!   stop_expires_at). Only PayoutStop stops the clock; IntakeStop refuses open and fund only.
+//! - Γ(t) = t - G(t), the global clock: it stands still while a PayoutStop is in force.
+//! - A freeze is measured on Γ: it began at Γ = freeze_since and lapses at Γ = freeze_until, so a
+//!   PayoutStop during a freeze also holds the freeze's own lapse back, and the escrow's frozen
+//!   seconds never count a second the global stop already counted.
+//! - escrow_now(t) = t - (G(t) - escrow.stop_base) - F(t), where stop_base is G at open and F is
+//!   Escrow.frozen_secs plus the part of the freeze in force that has elapsed on Γ.
+//!
+//! So the escrow clock never runs backwards and never runs faster than wall time: a stop of d
+//! seconds moves every deadline d seconds later in wall time (the deadlines themselves are stored
+//! as they were set, on the escrow clock), and never shortens a window. Nothing needs an
+//! instruction to land when a stop or a freeze lapses: each is read against wall time.
+//!
+//! No breaker stops a program upgrade: the upgrade authority (today the owner's key, later the
+//! multisig vault) can always deploy new bytes, and neither the guardian nor the admin of this
+//! Config can refuse it.
+
+use anchor_lang::prelude::*;
+
+use crate::{
+    constants::{
+        CONFIG_SEED, DEFAULT_MIN_REGRADERS, MAX_MINTS, MAX_REGISTRY, MAX_REGRADERS,
+        MAX_REVEAL_GRACE, MAX_REVOKED, MAX_SPONSORS, MAX_WINDOW, MIN_REVEAL_GRACE, STOP_DURATION,
+    },
+    error::EscrowError,
+    state::{Escrow, EscrowTerms},
+};
+
+/// The breaker level Config holds. The levels are ordered: PayoutStop includes IntakeStop, so the
+/// guardian, who may only escalate, moves Normal -> IntakeStop -> PayoutStop and never back.
+#[derive(
+    AnchorSerialize,
+    AnchorDeserialize,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    InitSpace,
+)]
+pub enum StopState {
+    /// Nothing is stopped.
+    Normal,
+    /// open_escrow and fund are refused.
+    IntakeStop,
+    /// open_escrow and fund, and every payout (claim, refund, settle and arbiter_resolve), are
+    /// refused, and every escrow's clock stands still.
+    PayoutStop,
+}
+
+/// One key of the regrader registry: `house` marks a key the house holds (open_escrow counts them
+/// against Config.max_house_regraders).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
+pub struct RegraderEntry {
+    pub key: Pubkey,
+    pub house: bool,
+}
+
+/// Which allowlist set_allowed edits.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AllowList {
+    /// Config.mints: the mints an escrow may hold.
+    Mint,
+    /// Config.sponsors: who may open an escrow.
+    Sponsor,
+    /// Config.regraders: the keys an escrow may name as regraders, each with its house flag.
+    Regrader,
+}
+
+/// Which Config key set_config_role replaces (the admin moves by propose_admin and accept_admin).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfigRole {
+    Guardian,
+    Arbiter,
+}
+
+/// Which of an escrow's keys rotate_role replaces.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EscrowRole {
+    Resolver,
+    Compliance,
+    Regrader,
+}
+
+/// The caps, the flow bucket, the bond minimum and the house-regrader allowance (set_limits).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
+pub struct Limits {
+    /// C_e: the most one escrow may hold (what open_escrow and fund deposited), in mint base units.
+    pub escrow_cap: u64,
+    /// C_g: the most every escrow not yet refunded may hold together (Config.open_value).
+    pub global_cap: u64,
+    /// The flow bucket's capacity: the most claims may pay out in a burst.
+    pub flow_capacity: u64,
+    /// Seconds the bucket takes to refill from empty to flow_capacity.
+    pub flow_period: i64,
+    /// The smallest bond_lamports open_escrow accepts (on top of the rent floor).
+    pub min_bond: u64,
+    /// The most house regraders one escrow may name (MAX_REGRADERS allows an all-house panel).
+    pub max_house_regraders: u8,
+}
+
+impl Limits {
+    pub fn validate(&self) -> Result<()> {
+        require!(
+            self.escrow_cap > 0
+                && self.global_cap > 0
+                && self.flow_capacity > 0
+                && (1..=MAX_WINDOW).contains(&self.flow_period)
+                && self.max_house_regraders <= MAX_REGRADERS,
+            EscrowError::InvalidConfig
+        );
+        Ok(())
+    }
+}
+
+/// The window floors open_escrow holds the terms to, on top of the compiled minimums, and the
+/// reveal grace every escrow opened after it takes (set_floors).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
+pub struct Floors {
+    pub min_challenge_window: i64,
+    pub min_attest_window: i64,
+    pub min_hold_window: i64,
+    pub min_claim_window: i64,
+    /// Seconds after challenge_deadline a challenge committed before it may still be revealed:
+    /// MIN_REVEAL_GRACE to MAX_REVEAL_GRACE.
+    pub reveal_grace: i64,
+}
+
+impl Floors {
+    pub fn validate(&self) -> Result<()> {
+        for floor in [
+            self.min_challenge_window,
+            self.min_attest_window,
+            self.min_hold_window,
+            self.min_claim_window,
+        ] {
+            require!(
+                (0..=MAX_WINDOW).contains(&floor),
+                EscrowError::InvalidConfig
+            );
+        }
+        require!(
+            (MIN_REVEAL_GRACE..=MAX_REVEAL_GRACE).contains(&self.reveal_grace),
+            EscrowError::InvalidConfig
+        );
+        Ok(())
+    }
+}
+
+/// What initialize_config writes: the keys, the limits, the floors and the starting lists.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ConfigInit {
+    pub admin: Pubkey,
+    pub guardian: Pubkey,
+    pub arbiter: Pubkey,
+    pub limits: Limits,
+    pub floors: Floors,
+    pub mints: Vec<Pubkey>,
+    pub sponsors: Vec<Pubkey>,
+    pub regraders: Vec<RegraderEntry>,
+}
+
+/// The program's Config. PDA: `["config"]`. Created once by the upgrade authority; every setter
+/// is the admin's, except the guardian's escalation verbs (set_stop up, set_freeze on, escalate,
+/// set_revoked on), which the admin may use too.
+#[account]
+#[derive(InitSpace, Debug, PartialEq, Eq)]
+pub struct Config {
+    pub bump: u8,
+    /// The breaker level as last set; it lapses to Normal at stop_expires_at (stop_level reads it).
+    pub stop: StopState,
+    /// The most house regraders one escrow may name.
+    pub max_house_regraders: u8,
+    /// Sets everything; today the owner's key, later the upgrade multisig vault.
+    pub admin: Pubkey,
+    /// The key propose_admin named, which accept_admin makes the admin; Pubkey::default() when
+    /// none is pending.
+    pub pending_admin: Pubkey,
+    /// The guardian: a separate key, never on the server, that may only escalate.
+    pub guardian: Pubkey,
+    /// The arbiter every escrow names and arbiter_resolve answers to; today the owner's key, later
+    /// the multisig vault.
+    pub arbiter: Pubkey,
+    /// C_e, in mint base units.
+    pub escrow_cap: u64,
+    /// C_g, in mint base units.
+    pub global_cap: u64,
+    /// What every escrow not yet refunded deposited (open_escrow and fund add, refund takes away).
+    pub open_value: u64,
+    pub flow_capacity: u64,
+    pub flow_period: i64,
+    /// The bucket as of flow_updated_at (wall time); claim refills it, then takes from it.
+    pub flow_level: u64,
+    pub flow_updated_at: i64,
+    pub min_bond: u64,
+    pub min_challenge_window: i64,
+    pub min_attest_window: i64,
+    pub min_hold_window: i64,
+    pub min_claim_window: i64,
+    pub reveal_grace: i64,
+    /// Wall time the stop in force was set (meaningful while `stop` is not Normal).
+    pub stop_since: i64,
+    /// Wall time the stop in force lapses.
+    pub stop_expires_at: i64,
+    /// Seconds of every PayoutStop that has ended: G before the one in force.
+    pub stopped_secs: i64,
+    #[max_len(MAX_MINTS)]
+    pub mints: Vec<Pubkey>,
+    #[max_len(MAX_SPONSORS)]
+    pub sponsors: Vec<Pubkey>,
+    #[max_len(MAX_REGISTRY)]
+    pub regraders: Vec<RegraderEntry>,
+    #[max_len(MAX_REVOKED)]
+    pub revoked: Vec<Pubkey>,
+    /// The fewest regraders an escrow may name (open_escrow's PanelTooSmall): DEFAULT_MIN_REGRADERS
+    /// at initialize_config, 1 to MAX_REGRADERS by set_min_regraders. It takes the first of the
+    /// bytes `reserved` held, so a Config written before it reads 0 here, which refuses no panel
+    /// (every panel names at least one regrader), as 1 does.
+    pub min_regraders: u8,
+    /// Zeroed room for later fields.
+    pub reserved: [u8; 63],
+}
+
+impl Config {
+    /// Account size: the 8-byte discriminator plus the fields at their longest.
+    pub const SPACE: usize = 8 + Self::INIT_SPACE;
+
+    /// Its address: `["config"]` under the program.
+    pub fn pda() -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[CONFIG_SEED], &crate::ID)
+    }
+
+    /// A fresh Config from `init`, the bucket full, nothing stopped or revoked.
+    pub fn new(init: ConfigInit, bump: u8, now: i64) -> Result<Self> {
+        require!(
+            init.admin != Pubkey::default()
+                && init.guardian != Pubkey::default()
+                && init.arbiter != Pubkey::default(),
+            EscrowError::InvalidConfig
+        );
+        init.limits.validate()?;
+        init.floors.validate()?;
+        require!(
+            init.mints.len() <= MAX_MINTS
+                && init.sponsors.len() <= MAX_SPONSORS
+                && init.regraders.len() <= MAX_REGISTRY,
+            EscrowError::ListFull
+        );
+        let mut config = Config {
+            bump,
+            stop: StopState::Normal,
+            max_house_regraders: 0,
+            admin: init.admin,
+            pending_admin: Pubkey::default(),
+            guardian: init.guardian,
+            arbiter: init.arbiter,
+            escrow_cap: 0,
+            global_cap: 0,
+            open_value: 0,
+            flow_capacity: 0,
+            flow_period: 0,
+            flow_level: 0,
+            flow_updated_at: now,
+            min_bond: 0,
+            min_challenge_window: 0,
+            min_attest_window: 0,
+            min_hold_window: 0,
+            min_claim_window: 0,
+            reveal_grace: 0,
+            stop_since: 0,
+            stop_expires_at: 0,
+            stopped_secs: 0,
+            mints: Vec::new(),
+            sponsors: Vec::new(),
+            regraders: Vec::new(),
+            revoked: Vec::new(),
+            min_regraders: DEFAULT_MIN_REGRADERS,
+            reserved: [0; 63],
+        };
+        config.set_limits(&init.limits, now)?;
+        config.flow_level = config.flow_capacity;
+        config.set_floors(&init.floors)?;
+        for mint in init.mints {
+            config.allow(AllowList::Mint, mint, false)?;
+        }
+        for sponsor in init.sponsors {
+            config.allow(AllowList::Sponsor, sponsor, false)?;
+        }
+        for entry in init.regraders {
+            config.allow(AllowList::Regrader, entry.key, entry.house)?;
+        }
+        Ok(config)
+    }
+
+    /// Writes `limits` (validated). The bucket keeps what it holds, refilled to `now` and capped
+    /// at the new capacity; flow_updated_at never moves back (Config::refill).
+    pub fn set_limits(&mut self, limits: &Limits, now: i64) -> Result<()> {
+        limits.validate()?;
+        if self.flow_period > 0 {
+            self.refill(now)?;
+        }
+        self.escrow_cap = limits.escrow_cap;
+        self.global_cap = limits.global_cap;
+        self.flow_capacity = limits.flow_capacity;
+        self.flow_period = limits.flow_period;
+        self.flow_level = self.flow_level.min(limits.flow_capacity);
+        self.flow_updated_at = self.flow_updated_at.max(now);
+        self.min_bond = limits.min_bond;
+        self.max_house_regraders = limits.max_house_regraders;
+        Ok(())
+    }
+
+    /// Writes the panel floor open_escrow holds every escrow to: 1 to MAX_REGRADERS
+    /// (InvalidConfig otherwise). Escrows already open keep the panel they named.
+    pub fn set_min_regraders(&mut self, min_regraders: u8) -> Result<()> {
+        require!(
+            (1..=MAX_REGRADERS).contains(&min_regraders),
+            EscrowError::InvalidConfig
+        );
+        self.min_regraders = min_regraders;
+        Ok(())
+    }
+
+    /// Writes `floors` (validated). Escrows already open keep the reveal grace they opened with.
+    pub fn set_floors(&mut self, floors: &Floors) -> Result<()> {
+        floors.validate()?;
+        self.min_challenge_window = floors.min_challenge_window;
+        self.min_attest_window = floors.min_attest_window;
+        self.min_hold_window = floors.min_hold_window;
+        self.min_claim_window = floors.min_claim_window;
+        self.reveal_grace = floors.reveal_grace;
+        Ok(())
+    }
+
+    /// Adds `key` to `list` (AlreadyListed, ListFull, InvalidConfig for the default key).
+    pub fn allow(&mut self, list: AllowList, key: Pubkey, house: bool) -> Result<()> {
+        require!(key != Pubkey::default(), EscrowError::InvalidConfig);
+        require!(!self.is_listed(list, &key), EscrowError::AlreadyListed);
+        match list {
+            AllowList::Mint => {
+                require!(self.mints.len() < MAX_MINTS, EscrowError::ListFull);
+                self.mints.push(key);
+            }
+            AllowList::Sponsor => {
+                require!(self.sponsors.len() < MAX_SPONSORS, EscrowError::ListFull);
+                self.sponsors.push(key);
+            }
+            AllowList::Regrader => {
+                require!(self.regraders.len() < MAX_REGISTRY, EscrowError::ListFull);
+                self.regraders.push(RegraderEntry { key, house });
+            }
+        }
+        Ok(())
+    }
+
+    /// Takes `key` off `list` (NotListed). Escrows already open keep what they named.
+    pub fn disallow(&mut self, list: AllowList, key: Pubkey) -> Result<()> {
+        require!(self.is_listed(list, &key), EscrowError::NotListed);
+        match list {
+            AllowList::Mint => self.mints.retain(|k| *k != key),
+            AllowList::Sponsor => self.sponsors.retain(|k| *k != key),
+            AllowList::Regrader => self.regraders.retain(|e| e.key != key),
+        }
+        Ok(())
+    }
+
+    pub fn is_listed(&self, list: AllowList, key: &Pubkey) -> bool {
+        match list {
+            AllowList::Mint => self.mints.contains(key),
+            AllowList::Sponsor => self.sponsors.contains(key),
+            AllowList::Regrader => self.regrader(key).is_some(),
+        }
+    }
+
+    /// The registry entry of `key`, if it is a registered regrader.
+    pub fn regrader(&self, key: &Pubkey) -> Option<&RegraderEntry> {
+        self.regraders.iter().find(|e| e.key == *key)
+    }
+
+    // ------------------------------------------------------------------- revocation
+
+    pub fn is_revoked(&self, key: &Pubkey) -> bool {
+        self.revoked.contains(key)
+    }
+
+    /// Refuses a revoked signer (KeyRevoked).
+    pub fn require_not_revoked(&self, key: &Pubkey) -> Result<()> {
+        require!(!self.is_revoked(key), EscrowError::KeyRevoked);
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------- the stop clock
+
+    /// The stop in force at wall time `now`: the level last set, or Normal once it lapsed.
+    pub fn stop_level(&self, now: i64) -> StopState {
+        if self.stop != StopState::Normal && now < self.stop_expires_at {
+            self.stop
+        } else {
+            StopState::Normal
+        }
+    }
+
+    /// G(now): every second a PayoutStop has held the clocks, up to wall time `now`.
+    pub fn global_stopped(&self, now: i64) -> i64 {
+        let running = if self.stop == StopState::PayoutStop {
+            now.min(self.stop_expires_at)
+                .saturating_sub(self.stop_since)
+                .max(0)
+        } else {
+            0
+        };
+        self.stopped_secs.saturating_add(running)
+    }
+
+    /// Γ(now) = now - G(now): the global clock, still while a PayoutStop is in force.
+    pub fn global_now(&self, now: i64) -> i64 {
+        now.saturating_sub(self.global_stopped(now))
+    }
+
+    /// Ends the stop in force at `now` (folding its elapsed PayoutStop seconds into
+    /// stopped_secs) and sets `level` from `now`: for good when Normal, else for STOP_DURATION.
+    /// With `keep_later` (an escalation) a stop in force that lapses later than that keeps its
+    /// lapse, so raising the level never brings the lapse closer: an IntakeStop the admin extended
+    /// past seven days, escalated to PayoutStop, still holds intake until the admin's lapse (the
+    /// PayoutStop then lasts as long; only the admin lowers or lifts it).
+    pub fn set_stop(&mut self, level: StopState, now: i64, keep_later: bool) {
+        let in_force = self.stop_level(now) != StopState::Normal;
+        let lapse = self.stop_expires_at;
+        self.stopped_secs = self.global_stopped(now);
+        self.stop = level;
+        self.stop_since = now;
+        self.stop_expires_at = if level == StopState::Normal {
+            now
+        } else if keep_later && in_force {
+            now.saturating_add(STOP_DURATION).max(lapse)
+        } else {
+            now.saturating_add(STOP_DURATION)
+        };
+    }
+
+    /// Refuses open_escrow and fund while IntakeStop or PayoutStop is in force.
+    pub fn require_intake(&self, now: i64) -> Result<()> {
+        require!(
+            self.stop_level(now) == StopState::Normal,
+            EscrowError::IntakeStopped
+        );
+        Ok(())
+    }
+
+    /// Refuses a payout step (claim, refund, settle, arbiter_resolve) while a PayoutStop is in
+    /// force (PayoutStopped) or the guardian's freeze of `escrow` is (EscrowFrozen).
+    pub fn require_payouts(&self, escrow: &Escrow, now: i64) -> Result<()> {
+        require!(
+            self.stop_level(now) != StopState::PayoutStop,
+            EscrowError::PayoutStopped
+        );
+        require!(
+            !escrow.is_frozen(self.global_now(now)),
+            EscrowError::EscrowFrozen
+        );
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------- the flow bucket
+
+    /// Refills the bucket to wall time `now`: flow_capacity per flow_period, never past capacity.
+    /// A `now` behind flow_updated_at (the cluster's stake-weighted clock may read earlier than it
+    /// did) adds nothing and leaves flow_updated_at where it is: moving it back would let the next
+    /// refill credit the same seconds a second time.
+    pub fn refill(&mut self, now: i64) -> Result<()> {
+        let elapsed = now.saturating_sub(self.flow_updated_at).max(0);
+        let period =
+            u128::try_from(self.flow_period.max(1)).map_err(|_| EscrowError::MathOverflow)?;
+        let added = u128::from(self.flow_capacity)
+            .checked_mul(u128::try_from(elapsed).map_err(|_| EscrowError::MathOverflow)?)
+            .ok_or(EscrowError::MathOverflow)?
+            / period;
+        let level = u128::from(self.flow_level)
+            .saturating_add(added)
+            .min(u128::from(self.flow_capacity));
+        self.flow_level = u64::try_from(level).map_err(|_| EscrowError::MathOverflow)?;
+        self.flow_updated_at = self.flow_updated_at.max(now);
+        Ok(())
+    }
+
+    /// Takes `amount` from the bucket, refilled to `now` first (FlowLimitExceeded when it holds
+    /// less).
+    ///
+    /// The bucket refills on wall time, while claim_deadline runs on the escrow clock, and neither
+    /// knows the other: a bucket that cannot pay the claims due in one claim window (it pays
+    /// flow_capacity at once, then flow_capacity per flow_period) turns claimants away until their
+    /// claim_deadline passes and their prizes lapse into refund, so ops size it at or above the
+    /// claims due in one claim window (the README's incident runbook).
+    pub fn take_flow(&mut self, amount: u64, now: i64) -> Result<()> {
+        self.refill(now)?;
+        self.flow_level = self
+            .flow_level
+            .checked_sub(amount)
+            .ok_or(EscrowError::FlowLimitExceeded)?;
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------- caps
+
+    /// Adds `amount` to what one escrow holds (`deposited` before it) and to open_value, held to
+    /// C_e (EscrowCapExceeded) and C_g (GlobalCapExceeded). Returns the escrow's new deposited.
+    pub fn deposit(&mut self, deposited: u64, amount: u64) -> Result<u64> {
+        let escrow_total = deposited
+            .checked_add(amount)
+            .filter(|total| *total <= self.escrow_cap)
+            .ok_or(EscrowError::EscrowCapExceeded)?;
+        self.open_value = self
+            .open_value
+            .checked_add(amount)
+            .filter(|total| *total <= self.global_cap)
+            .ok_or(EscrowError::GlobalCapExceeded)?;
+        Ok(escrow_total)
+    }
+
+    /// Takes a refunded escrow's deposit off open_value (never below zero: a refund is never
+    /// refused for the counter's sake). Only refund calls it: an escrow paid out in full still
+    /// counts against global_cap until its refund runs after claim_deadline (the server's refund
+    /// job sends it then).
+    pub fn release(&mut self, deposited: u64) {
+        self.open_value = self.open_value.saturating_sub(deposited);
+    }
+
+    // ------------------------------------------------------------------- the open policy
+
+    /// What open_escrow holds `terms` to on top of EscrowTerms::validate, each its own error:
+    /// the mint on the allowlist (MintNotAllowed), the sponsor too (SponsorNotAllowed), refund_to
+    /// the sponsor (RefundToNotSponsor), the arbiter Config's (ArbiterNotConfig), a compliance key
+    /// (ComplianceRequired), neither the resolver nor the compliance key the address of the
+    /// `escrow` being opened (RoleIsEscrow: a PDA of this program that it never signs for, so
+    /// post_result, holds and co-signatures could never land and every claim would clear unheld
+    /// on the lapse path), the bond at least min_bond (BondBelowMin), each window at least its
+    /// floor (WindowBelowFloor), at least min_regraders regraders (PanelTooSmall), every regrader
+    /// registered (RegraderNotRegistered), at most max_house_regraders of them the house's
+    /// (TooManyHouseRegraders), no resolver or compliance key among them
+    /// (RegraderNotIndependent), and no key revoked (KeyRevoked).
+    ///
+    /// max_house_regraders is the admin's: bootstrap sets it to the panel's size (an all-house
+    /// panel, owner decision #541), so today the allowance refuses nothing, the house's keys hold
+    /// every panel's quorum, and the guardian's escalation inside the challenge and attest windows
+    /// (breakers::handle_escalate) is what stands between a server compromise and the pot. A later
+    /// Config lowers it below a majority (set_limits). min_regraders is the admin's too: 1 by
+    /// default (#541), so a one-regrader panel, whose one vote decides a dispute, is allowed until
+    /// the admin raises the floor (set_min_regraders), with no upgrade.
+    pub fn check_open_policy(
+        &self,
+        sponsor: &Pubkey,
+        mint: &Pubkey,
+        escrow: &Pubkey,
+        terms: &EscrowTerms,
+    ) -> Result<()> {
+        require!(self.mints.contains(mint), EscrowError::MintNotAllowed);
+        require!(
+            self.sponsors.contains(sponsor),
+            EscrowError::SponsorNotAllowed
+        );
+        require!(terms.refund_to == *sponsor, EscrowError::RefundToNotSponsor);
+        require!(terms.arbiter == self.arbiter, EscrowError::ArbiterNotConfig);
+        require!(
+            terms.compliance != Pubkey::default(),
+            EscrowError::ComplianceRequired
+        );
+        require!(
+            terms.resolver != *escrow && terms.compliance != *escrow,
+            EscrowError::RoleIsEscrow
+        );
+        require!(
+            terms.bond_lamports >= self.min_bond,
+            EscrowError::BondBelowMin
+        );
+        for (window, floor) in [
+            (terms.challenge_window, self.min_challenge_window),
+            (terms.attest_window, self.min_attest_window),
+            (terms.hold_window, self.min_hold_window),
+            (terms.claim_window, self.min_claim_window),
+        ] {
+            require!(window >= floor, EscrowError::WindowBelowFloor);
+        }
+        require!(
+            terms.regraders.len() >= usize::from(self.min_regraders),
+            EscrowError::PanelTooSmall
+        );
+        let mut house = 0u8;
+        for regrader in &terms.regraders {
+            let entry = self
+                .regrader(regrader)
+                .ok_or(EscrowError::RegraderNotRegistered)?;
+            house = house.saturating_add(u8::from(entry.house));
+        }
+        require!(
+            house <= self.max_house_regraders,
+            EscrowError::TooManyHouseRegraders
+        );
+        require!(
+            !terms.regraders.contains(&terms.resolver)
+                && !terms.regraders.contains(&terms.compliance),
+            EscrowError::RegraderNotIndependent
+        );
+        for key in [sponsor, &terms.resolver, &terms.compliance]
+            .into_iter()
+            .chain(terms.regraders.iter())
+        {
+            self.require_not_revoked(key)?;
+        }
+        Ok(())
+    }
+
+    /// How many of `regraders` the registry marks as the house's.
+    pub fn house_count(&self, regraders: &[Pubkey]) -> u8 {
+        regraders
+            .iter()
+            .filter(|key| self.regrader(key).is_some_and(|e| e.house))
+            .count()
+            .try_into()
+            .unwrap_or(u8::MAX)
+    }
+}
+
+/// The escrow clock at wall time `now`: wall time minus the seconds `escrow` has been stopped (by
+/// a global PayoutStop since it opened, or its own guardian freeze), counted once when both
+/// overlap. Every deadline comparison goes through it.
+pub fn escrow_now(escrow: &Escrow, config: &Config, now: i64) -> i64 {
+    let global_now = config.global_now(now);
+    global_now
+        .saturating_add(escrow.stop_base)
+        .saturating_sub(escrow.frozen_secs_at(global_now))
+}
+
+/// The wall clock, for the stop and the bucket, and the escrow clock, for every deadline.
+pub fn clocks(escrow: &Escrow, config: &Config) -> Result<(i64, i64)> {
+    let wall = Clock::get()?.unix_timestamp;
+    Ok((wall, escrow_now(escrow, config, wall)))
+}
+
+const _: () = assert!(MAX_REVOKED > 0 && MAX_REGISTRY >= MAX_REGRADERS as usize);

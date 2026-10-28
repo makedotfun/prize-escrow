@@ -1,0 +1,49 @@
+[package]
+name = "prize_escrow_fuzz"
+version = "0.1.0"
+description = "The blast-radius oracle (chain/programs/prize_escrow/tests/support) under crucible's coverage-guided invariant fuzzer"
+edition = "2021"
+rust-version = "1.89"
+license = "UNLICENSED"
+publish = false
+
+# A workspace of its own (and its own Cargo.lock): crucible pins LiteSVM 0.15.2 and LibAFL 0.15,
+# which the program's workspace (chain/Cargo.toml, chain/Cargo.lock) does not carry.
+[workspace]
+
+[[bin]]
+name = "invariant_test"
+path = "src/main.rs"
+
+[dependencies]
+# asymmetric-research/crucible (MIT), pinned to the commit read on 2026-10-27 (pushed 2026-10-26).
+crucible-fuzzer = { git = "https://github.com/asymmetric-research/crucible", rev = "26c23914548035d51b86e885e86f5e3ebafb88ee" }
+crucible-test-context = { git = "https://github.com/asymmetric-research/crucible", rev = "26c23914548035d51b86e885e86f5e3ebafb88ee" }
+# What crucible's generated harness code names directly (its examples' set).
+arbitrary = { version = "1", features = ["derive"] }
+ctrlc = "3.4"
+libafl = { version = "0.15.1", features = ["std", "cli", "prelude"] }
+libafl_bolts = { version = "0.15.1", features = ["std"] }
+# The program's types, instruction builders and pure functions (not its entrypoint), and what the
+# shared world (tests/support/mod.rs) uses.
+prize_escrow = { path = "../../programs/prize_escrow", features = ["no-entrypoint"] }
+anchor-lang = { version = "1.2.1", features = ["init-if-needed", "event-cpi"] }
+anchor-spl = { version = "1.2.1", default-features = false, features = ["token", "associated_token", "solana-v3"] }
+litesvm = "=0.15.2"
+solana-account = "4"
+solana-keypair = "3"
+solana-message = "4"
+solana-pubkey = "3"
+solana-signer = "3"
+solana-transaction = "4"
+solana-transaction-error = "3"
+solana-sha256-hasher = { version = "3.1.0", features = ["sha2"] }
+
+[features]
+default = []
+# One feature per invariant test, named as the test (crucible's convention).
+blast_radius = []
+
+[profile.release]
+debug = true
+strip = false

@@ -1,0 +1,87 @@
+{
+  "$comment": "Public keys only, per cluster, written by scripts/chain/bootstrap.ts from what the chain holds after it runs, and by scripts/chain/deploy.ts on a deploy or an upgrade (programSha256: the verified sha256 of the bytes deployed; upgrade: a prepared buffer and its verified sha256, until the upgrade authority applies it). governance names who holds the roles: single-key (owner decision #541: the owner's key is the upgrade authority, the Config's admin and its arbiter, and a separate owner key is its guardian, none of them on the server; the upgrade authority moves only by SetAuthorityChecked, which the new key co-signs, so while a prepared handover waits upgradeAuthority is still the deploy key and roles.upgradeAuthority names the owner's), or squads (a test cluster: squads.vault is every escrow's arbiter, and upgradeAuthority is the deploy key). Localnet addresses all derive from key files, so they survive a ledger reset.",
+  "localnet": {
+    "programId": "sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd",
+    "build": "test-windows",
+    "programSha256": "08af82409b2d6d8dfa98e136606474fed79fdc5573e0e7d002bb4d50b66440c0",
+    "upgradeAuthority": "BUVep669RCgTHp1f5ea3H3SuKAG5YEyJAW8PAyaXzmPY",
+    "squads": {
+      "program": "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf",
+      "programConfig": "BSTq9w3kZwNwpBXJEvTZz2G9ZTNyKBvoSeXMvwb4cNZr",
+      "treasury": "HM5y4mz3Bt9JY9mr1hkyhnvqxSH4H2u2451j7Hc2dtvK",
+      "multisig": "3zfj23yVzNv5md2pNfnWD7sXGq9vwkdnoCDJttiYAaGm",
+      "createKey": "8AZSy95H4Hh4ojsFtweW5mrSAJzT2FLi9vFoQiG3KeMB",
+      "vault": "BUVep669RCgTHp1f5ea3H3SuKAG5YEyJAW8PAyaXzmPY",
+      "threshold": 2,
+      "timeLockSeconds": 60,
+      "members": [
+        "AjXjxwAdW9YgGdrGS4H3Mfd45fYw7NZcfkL4xF3di89",
+        "6PnZopzA7J6s82XeR35WXhvNLPB3tzpGC7LxwM5Y9N6t",
+        "BR54hwWom3MWV1ubZWo4odxbngFYzbsnLMfVhHb4REaK"
+      ]
+    },
+    "mint": {
+      "address": "3QLiEwTxgZBqdxLx696RgEsro3aVyoRuHNwoS8b9H4Xb",
+      "decimals": 6,
+      "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "mintAuthority": "2xL99uxhP9oomd1RXLFinFGiKVuW7bvVJyrqNnc6RAMQ"
+    },
+    "keys": {
+      "deployer": "2xL99uxhP9oomd1RXLFinFGiKVuW7bvVJyrqNnc6RAMQ",
+      "sponsor": "ANroc3Dr7T6aHmxgCHkJUNPNcbqNFFP48vhtmLoXJVEm",
+      "resolver": "G1pmrMed9LarBnMiMDUQRNx5VQJxcFxb3bKN7MK77wEK",
+      "compliance": "9FY9RDMgATFQs2hWMc8firmG6ARYzAACbwCSPpFdxvmb",
+      "regraders": [
+        "8AhjLGYn4j8RD8JwSv5qpwZvk3JF6GpsEaV41huob9Fe",
+        "2KopyRqvGTRvHq9qzzxxKysGvNQobyw6zH2tJQNSjUFn",
+        "91hMmXho2PmuaQVX12JRDLrAYotG96ZxFxGgnbC9vsra"
+      ]
+    }
+  },
+  "devnet": {
+    "programId": "sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd",
+    "build": "test-windows",
+    "programSha256": "2525c2c9fc2e76afdec4b21c61a6e914bbdfa28c9ac8cbb8fe721cd8788ec68a",
+    "upgradeAuthority": "9LDrDGKnTTQsGz1aBB37VuqaiYY3zs4YsQbcoPF1uAq6",
+    "governance": "squads",
+    "config": "B6Zuh2vXHEVNBwr3bsndJdD9Z6e54TQVhjJj5GRUpfTC",
+    "roles": {
+      "upgradeAuthority": "9LDrDGKnTTQsGz1aBB37VuqaiYY3zs4YsQbcoPF1uAq6",
+      "admin": "9LDrDGKnTTQsGz1aBB37VuqaiYY3zs4YsQbcoPF1uAq6",
+      "arbiter": "F7CZSXhC5LJKnepMH9mmhsac951w5Ga3vhN6EmpHHai4",
+      "guardian": "8sT7AM7znqPyPSWuDnjz8Enwt5y27RmYSMgXd1ppVwME"
+    },
+    "squads": {
+      "program": "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf",
+      "programConfig": "BSTq9w3kZwNwpBXJEvTZz2G9ZTNyKBvoSeXMvwb4cNZr",
+      "treasury": "HM5y4mz3Bt9JY9mr1hkyhnvqxSH4H2u2451j7Hc2dtvK",
+      "multisig": "6t17zYh2AyrKrVj1Fp7HvXxqayHsYG3kXWeddW51FWu4",
+      "createKey": "AJsPdm92SUbska8d1E9BAbYDrN5qcFQrUcac4EwcnHwH",
+      "vault": "F7CZSXhC5LJKnepMH9mmhsac951w5Ga3vhN6EmpHHai4",
+      "threshold": 2,
+      "timeLockSeconds": 60,
+      "members": [
+        "5XbaSFvvRf32f2Fg55F5SJv4Jt1inE3DfYHYRPW8YRJ",
+        "5ASPyDaMt8p8Vz9HupgdLLW9rQKr2RyEyw1Zu4bWqS8n",
+        "7bpTgavaiGVLGgJ9JLW8SCJeamC8EGEBVEDTZuzB56M8"
+      ]
+    },
+    "mint": {
+      "address": "4v3VCFJd7B5KUiqRRFVTJ7BdMaQKnoH3Lts71hEwE1Hp",
+      "decimals": 6,
+      "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "mintAuthority": "9LDrDGKnTTQsGz1aBB37VuqaiYY3zs4YsQbcoPF1uAq6"
+    },
+    "keys": {
+      "deployer": "9LDrDGKnTTQsGz1aBB37VuqaiYY3zs4YsQbcoPF1uAq6",
+      "sponsor": "GT5z1hjhHEsuNV4c3HDHgeKXWiJfbFkmEvzJAJVg6Krq",
+      "resolver": "JBHYDTNdz5sbcPAbAMV1bUAWMtUzLxLWiCVY5AezNK8e",
+      "compliance": "rgKTj63nYEXmgQ3DTU583XMvQvAuUSm3nKkjFNATgJZ",
+      "regraders": [
+        "HJXjQG3N4fSh4hSkVieR7yUnnVGXX7XjY5vZ7h9jdqzk",
+        "HLAmSMfiQGXuEXvysGNgxe92VaGJHyr3AUhpJ7aJ8ba",
+        "3rANARNNj1SZjWcUCERaGgGJexv2BVKeampPLBMRyGvS"
+      ]
+    }
+  }
+}

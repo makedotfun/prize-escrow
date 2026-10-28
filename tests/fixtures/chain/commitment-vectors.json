@@ -1,0 +1,50 @@
+{
+  "schema": "agent-fun/commitment-vectors/v1",
+  "about": "Result commitment vectors for the prize escrow, written with node:crypto alone. server/chain/result.ts resultCommitment (tests/unit/chain-result.test.ts) and the program's state::result_commitment (chain/programs/prize_escrow/tests/commitment.rs) must reproduce every commitment. Hashes are lowercase hex; totals are decimal u64 strings.",
+  "domain": "agent-fun/result-commitment/v1",
+  "commitment": "sha256(utf8(domain) || result_sha256[32] || payout_root[32] || u64le(total))",
+  "vectors": [
+    {
+      "name": "the smallest total",
+      "result_sha256": "19c0bcecb5e4cebe6d0b1ff0ab35a0b583e1c73c5f6d143d9ddb56eea01923bf",
+      "payout_root": "bfe1c7f9eef2abe0227bf1386fab2ba2caddf4842e13a291af40ce638fa95e57",
+      "total": "1",
+      "commitment": "9d75a11b3fac3b331865f4366da14d75b7305e009f9ed0be37211f8c3159616e"
+    },
+    {
+      "name": "a 1.5 USDC pot",
+      "result_sha256": "abababababababababababababababababababababababababababababababab",
+      "payout_root": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "total": "1500000",
+      "commitment": "2cd8cbee47de8c13d1a72b45603b92f47f37fb135c0e4fe5e427d3c6a4b93521"
+    },
+    {
+      "name": "the same document posted with another payout root",
+      "result_sha256": "abababababababababababababababababababababababababababababababab",
+      "payout_root": "cececececececececececececececececececececececececececececececece",
+      "total": "1500000",
+      "commitment": "c0a5366b2f504888153c7ca2ade5d84ec4f1914e860e0163ef128b0593283f4e"
+    },
+    {
+      "name": "the same document and root with one base unit more",
+      "result_sha256": "abababababababababababababababababababababababababababababababab",
+      "payout_root": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "total": "1500001",
+      "commitment": "13dfd2a51d374bfa091cff0420036b0ec4ddcf08c22e180feb8bc92f54ceb73c"
+    },
+    {
+      "name": "a total whose eight bytes differ (little-endian order)",
+      "result_sha256": "b0098de67ee1315646057400f0bf71af2d6da5fb21cdfd0ec919649df6d341ee",
+      "payout_root": "17fae22fe44f17b035b720196dfd24db9be36f365e359ba1fa160a3b74041023",
+      "total": "72623859790382856",
+      "commitment": "2cbba3c9429e20a02ed7f94d18a3c51af60a5db05466ea125e81383c9b2cdf27"
+    },
+    {
+      "name": "the largest u64 total",
+      "result_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "payout_root": "0101010101010101010101010101010101010101010101010101010101010101",
+      "total": "18446744073709551615",
+      "commitment": "eb29e0682567600cd9154c5e320ec15c6d4ba60ffb70324a5af44c6767697f9e"
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+[package]
+name = "prize_escrow_kani"
+version = "0.1.0"
+description = "Kani proofs of prize_escrow's pure functions: merkle verify, the result and commit commitments, the escrow clock and the stop escalation, the claim flow bucket, check_deposit and bonds_to_winner"
+edition = "2021"
+rust-version = "1.89"
+license = "UNLICENSED"
+publish = false
+
+# A workspace of its own, with its own Cargo.lock (chain/Cargo.lock pruned to this graph, so the
+# program compiles from the same crate versions it ships with): only the program's own
+# dependencies reach Kani's compiler, none of its dev-dependencies (LiteSVM and Agave). Cargo
+# never discovers this crate as one of prize_escrow's integration tests (there is no main.rs).
+[workspace]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# The program's pure functions (lib.rs, merkle.rs, state.rs, config.rs), not its entrypoint, and
+# what src/instructions/open_escrow.rs (compiled in here for its pub(crate) check_deposit) names.
+prize_escrow = { path = "../..", features = ["no-entrypoint"] }
+anchor-lang = { version = "1.2.1", features = ["init-if-needed", "event-cpi"] }
+anchor-spl = { version = "1.2.1", default-features = false, features = ["token", "associated_token", "solana-v3"] }
+# The two hash functions the proofs stub (src/oracle.rs) and the digest type they return.
+solana-keccak-hasher = { version = "3.1.0", features = ["sha3"] }
+solana-sha256-hasher = { version = "3.1.0", features = ["sha2"] }
+solana-hash = "4"
+
+# The cfgs the Anchor derives in open_escrow.rs test, which this crate never turns on.
+[features]
+default = []
+anchor-debug = []
+cpi = []
+idl-build = []
+
+# `cargo kani` reads these. stubbing: the oracles stand in for the hash functions
+# (#[kani::stub]). no-assertion-reach-checks: a reach check per assertion makes CBMC write a
+# trace for every reachable one, and on the five-leaf trees those traces took kani-driver past
+# 7.5 GB (the Docker VM's OOM killer ended it); every harness carries kani::cover! instead, and
+# run.mjs fails a harness whose covers are not all satisfied (a vacuous proof).
+[package.metadata.kani.flags]
+no-assertion-reach-checks = true
+
+[package.metadata.kani.unstable]
+stubbing = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(target_os, values("solana"))'] }

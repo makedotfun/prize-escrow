@@ -1,0 +1,25 @@
+[workspace]
+members = [
+    "programs/*"
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.89.0"
+
+# solana-verify (scripts/chain/verify-build.ts) picks its build image from this: the
+# solanafoundation/solana-verifiable-build image of this Agave release, pinned by digest inside
+# solana-verify. It is Anchor.toml's [toolchain] solana_version; tests/chain/build-provenance.test.ts
+# keeps the two equal. Cargo ignores [workspace.metadata], so the bytes do not depend on it.
+[workspace.metadata.cli]
+solana = "3.1.10"
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
+[profile.release.build-override]
+opt-level = 3
+incremental = false
+codegen-units = 1

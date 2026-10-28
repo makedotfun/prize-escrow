@@ -1,0 +1,7162 @@
+{
+  "address": "sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd",
+  "metadata": {
+    "name": "prize_escrow",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "make.fun prize escrow: a funded vault per competition, a bonded and challengeable result, k-of-n regrader attestations, a Squads arbiter, and merkle self-claims"
+  },
+  "instructions": [
+    {
+      "name": "accept_admin",
+      "docs": [
+        "The proposed admin takes the Config, unless its key is revoked."
+      ],
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "new_admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "arbiter_resolve",
+      "docs": [
+        "The Config's arbiter chooses which result of a Frozen escrow applies, the posted one or a",
+        "challenge's alternative at least one named regrader voted for (its Challenge PDA passed",
+        "in), as stored, naming its commitment; the chosen side takes every bond, and the escrow is",
+        "Claimable on its result. Keeping the posted result clears an alternative a quorum recorded."
+      ],
+      "discriminator": [
+        72,
+        74,
+        145,
+        98,
+        97,
+        32,
+        107,
+        5
+      ],
+      "accounts": [
+        {
+          "name": "arbiter",
+          "docs": [
+            "Config.arbiter (every escrow names it at open; a Config rotate moves every escrow to the new",
+            "one): a Squads v4 vault PDA, which can only sign through the multisig's CPI, or a key."
+          ],
+          "signer": true
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "relations": [
+            "challenge"
+          ]
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "Read for its balance: the chosen side's total must not exceed it."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "resolver",
+          "docs": [
+            "Every bond when the posted result is chosen."
+          ],
+          "writable": true
+        },
+        {
+          "name": "challenge",
+          "docs": [
+            "The chosen Challenge PDA (choice Alternative): its escrow this one, its alt_commitment the",
+            "instruction's `commitment`. Omitted when the posted result is chosen."
+          ],
+          "optional": true
+        },
+        {
+          "name": "challenger",
+          "docs": [
+            "handler). Every bond when its alternative is chosen; omitted with the challenge."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The arbiter, the stop clock, the PayoutStop, the guardian's freeze and the revoked keys."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "choice",
+          "type": {
+            "defined": {
+              "name": "ArbiterChoice"
+            }
+          }
+        },
+        {
+          "name": "commitment",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "attest",
+      "docs": [
+        "A named regrader backs the posted result or one challenge's (its Challenge PDA passed in)",
+        "by its commitment, once, before attest_deadline. Counts the vote, and records the",
+        "challenge whose votes reach k as the winning alternative; the status is settle's to change."
+      ],
+      "discriminator": [
+        83,
+        148,
+        120,
+        119,
+        144,
+        139,
+        117,
+        160
+      ],
+      "accounts": [
+        {
+          "name": "regrader",
+          "docs": [
+            "One of the escrow's named regraders; pays the attestation's rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "relations": [
+            "challenge"
+          ]
+        },
+        {
+          "name": "attestation",
+          "docs": [
+            "One per regrader per escrow, so a regrader votes once."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  116,
+                  116,
+                  101,
+                  115,
+                  116,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "account",
+                "path": "regrader"
+              }
+            ]
+          }
+        },
+        {
+          "name": "challenge",
+          "docs": [
+            "The Challenge PDA whose commitment the vote names; omitted for a vote on the posted result."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The stop clock and the revoked keys."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "commitment",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "challenge_commit",
+      "docs": [
+        "A challenge's first step: anyone bonds a commit to sha256(alt_commitment || challenger ||",
+        "salt) before challenge_deadline, at the PDA [\"commit\", escrow, challenger, hash]."
+      ],
+      "discriminator": [
+        97,
+        93,
+        210,
+        149,
+        134,
+        101,
+        154,
+        226
+      ],
+      "accounts": [
+        {
+          "name": "challenger",
+          "docs": [
+            "Anyone: pays the SOL bond into the escrow account and the commit's rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "commit",
+          "docs": [
+            "One per (escrow, challenger, hash): the challenger in the seeds keeps a copied hash at",
+            "another address."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  109,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "account",
+                "path": "challenger"
+              },
+              {
+                "kind": "arg",
+                "path": "hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "challenge_reveal",
+      "docs": [
+        "A challenge's second step: the commit's challenger reveals `salt` and the alternative",
+        "result (document hash, payout root and total, the total at most the vault balance) whose",
+        "commitment (`alt_commitment`, its result_commitment) differs from the posted one and from",
+        "every earlier challenge's, in a slot after the commit's and before challenge_deadline +",
+        "reveal_grace, into its own Challenge PDA [\"challenge\", escrow, alt_commitment]. The first",
+        "makes the escrow Disputed and opens the attestation window; a later one joins the dispute."
+      ],
+      "discriminator": [
+        222,
+        52,
+        199,
+        81,
+        7,
+        29,
+        195,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "challenger",
+          "docs": [
+            "The commit's challenger: pays the Challenge PDA's rent and takes the commit's back."
+          ],
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "commit"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "relations": [
+            "commit"
+          ]
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "Read for its balance: the alternative's total must not exceed it, so a quorum for the",
+            "alternative can always apply it."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "commit",
+          "docs": [
+            "The challenger's commit, closed here (its rent back to the challenger)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  109,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "account",
+                "path": "challenger"
+              },
+              {
+                "kind": "account",
+                "path": "commit.hash",
+                "account": "CommitRecord"
+              }
+            ]
+          }
+        },
+        {
+          "name": "challenge",
+          "docs": [
+            "One per distinct alternative: `init` refuses a commitment already challenged."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  104,
+                  97,
+                  108,
+                  108,
+                  101,
+                  110,
+                  103,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "arg",
+                "path": "alt_commitment"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "salt",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "alt_result_sha256",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "alt_payout_root",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "alt_total",
+          "type": "u64"
+        },
+        {
+          "name": "alt_commitment",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "claim",
+      "docs": [
+        "The claimant takes `amount` (0 = all that is left) of its leaf's `total_amount` from",
+        "the vault into its own token account, while Claimable and before claim_deadline, within",
+        "the flow bucket. It needs the compliance key's co-signature or a cleared request."
+      ],
+      "discriminator": [
+        62,
+        198,
+        214,
+        193,
+        213,
+        159,
+        108,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "claimant",
+          "docs": [
+            "The winner: signs for its own leaf."
+          ],
+          "signer": true
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the fees and any rent; separate from the claimant, so a claim can be gasless."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "compliance",
+          "docs": [
+            "escrow.compliance co-signing a screened claim. Omitted on the lapse path (a request whose",
+            "hold window passed with no hold) and when the escrow has no compliance gate."
+          ],
+          "signer": true,
+          "optional": true
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "claimant_token_account",
+          "docs": [
+            "The claimant's own associated token account (the destination owner pin)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "claimant"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "receipt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  108,
+                  97,
+                  105,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "account",
+                "path": "claimant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The stop clock, the PayoutStop, the guardian's freeze, the revoked keys and the flow",
+            "bucket (written: the claim takes from it)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "total_amount",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "proof",
+          "type": {
+            "vec": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "close_attestation",
+      "docs": [
+        "Permissionless: closes a regrader's Attestation once its escrow is Closed, its rent back",
+        "to the regrader."
+      ],
+      "discriminator": [
+        249,
+        84,
+        133,
+        23,
+        48,
+        175,
+        252,
+        221
+      ],
+      "accounts": [
+        {
+          "name": "escrow"
+        },
+        {
+          "name": "attestation",
+          "docs": [
+            "The vote, at its own PDA [\"attestation\", escrow, regrader] (so this escrow's, and the",
+            "regrader account's: ConstraintSeeds for any other), closed into its regrader."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  116,
+                  116,
+                  101,
+                  115,
+                  116,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "account",
+                "path": "regrader"
+              }
+            ]
+          }
+        },
+        {
+          "name": "regrader",
+          "docs": [
+            "The regrader who voted and paid the rent: the rent goes back to it."
+          ],
+          "writable": true,
+          "relations": [
+            "attestation"
+          ]
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_challenge",
+      "docs": [
+        "Permissionless: closes a Challenge PDA once its dispute is over (Claimable or Closed), its",
+        "rent back to its challenger, and its bond too after a refund that decided nothing."
+      ],
+      "discriminator": [
+        29,
+        156,
+        109,
+        17,
+        41,
+        99,
+        71,
+        236
+      ],
+      "accounts": [
+        {
+          "name": "escrow",
+          "docs": [
+            "Pays back a bond a refund left held."
+          ],
+          "writable": true,
+          "relations": [
+            "challenge"
+          ]
+        },
+        {
+          "name": "challenge",
+          "writable": true
+        },
+        {
+          "name": "challenger",
+          "docs": [
+            "Its rent back, and its bond after a refund that decided nothing."
+          ],
+          "writable": true,
+          "relations": [
+            "challenge"
+          ]
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_commit",
+      "docs": [
+        "Permissionless: closes a commit never revealed once its escrow decided (Claimable or",
+        "Closed), its bond and rent back to its own challenger."
+      ],
+      "discriminator": [
+        10,
+        100,
+        166,
+        222,
+        189,
+        214,
+        149,
+        26
+      ],
+      "accounts": [
+        {
+          "name": "escrow",
+          "docs": [
+            "Pays the commit's bond back."
+          ],
+          "writable": true,
+          "relations": [
+            "commit"
+          ]
+        },
+        {
+          "name": "commit",
+          "writable": true
+        },
+        {
+          "name": "challenger",
+          "writable": true,
+          "relations": [
+            "commit"
+          ]
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_receipt",
+      "docs": [
+        "The claimant closes its receipt after the escrow is Closed and takes the rent back."
+      ],
+      "discriminator": [
+        126,
+        254,
+        244,
+        203,
+        124,
+        164,
+        134,
+        89
+      ],
+      "accounts": [
+        {
+          "name": "claimant",
+          "docs": [
+            "The receipt's claimant; gets the rent back."
+          ],
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "receipt"
+          ]
+        },
+        {
+          "name": "escrow"
+        },
+        {
+          "name": "receipt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  108,
+                  97,
+                  105,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "account",
+                "path": "claimant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "commit_entries",
+      "docs": [
+        "The resolver fixes the entries root of at least one entry, once, before entries_deadline,",
+        "while Open."
+      ],
+      "discriminator": [
+        21,
+        44,
+        252,
+        51,
+        214,
+        90,
+        243,
+        177
+      ],
+      "accounts": [
+        {
+          "name": "resolver",
+          "signer": true,
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The stop clock and the revoked keys."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "entries_root",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "entries_count",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "escalate",
+      "docs": [
+        "The guardian hands an undecided (Challengeable or Disputed) escrow to the arbiter: Frozen.",
+        "A recorded quorum binds once settle may apply it, and is refused from then on",
+        "(QuorumRecorded): at challenge_deadline for the posted result, at attest_deadline for a",
+        "challenge's alternative. An unchallenged result binds once its challenge window is over",
+        "(challenge_deadline, or the reveal grace's end while a commit is pending), and is refused",
+        "from then on too (UnchallengedResultBinds)."
+      ],
+      "discriminator": [
+        123,
+        99,
+        100,
+        10,
+        66,
+        238,
+        154,
+        23
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "extend_freeze",
+      "docs": [
+        "The admin moves the lapse of an escrow's freeze later."
+      ],
+      "discriminator": [
+        165,
+        118,
+        234,
+        197,
+        233,
+        230,
+        112,
+        205
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "extra",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "extend_stop",
+      "docs": [
+        "The admin moves the lapse of the stop in force later."
+      ],
+      "discriminator": [
+        103,
+        61,
+        0,
+        53,
+        71,
+        249,
+        99,
+        246
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "extra",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "fund",
+      "docs": [
+        "The sponsor adds `amount` to the vault while the escrow is Open, within the caps."
+      ],
+      "discriminator": [
+        218,
+        188,
+        111,
+        221,
+        152,
+        113,
+        174,
+        7
+      ],
+      "accounts": [
+        {
+          "name": "sponsor",
+          "signer": true,
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "sponsor_token_account",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The caps (open_value grows by the deposit) and the stop."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "hold",
+      "docs": [
+        "The compliance key holds `claimant`'s claim with a HOLD_* reason, creating the receipt",
+        "if needed."
+      ],
+      "discriminator": [
+        83,
+        159,
+        208,
+        118,
+        203,
+        182,
+        239,
+        221
+      ],
+      "accounts": [
+        {
+          "name": "compliance",
+          "docs": [
+            "escrow.compliance; pays the receipt's rent when the claimant has none yet."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "escrow"
+        },
+        {
+          "name": "receipt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  108,
+                  97,
+                  105,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "arg",
+                "path": "claimant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The stop clock and the revoked keys."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "claimant",
+          "type": "pubkey"
+        },
+        {
+          "name": "reason",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "initialize_config",
+      "docs": [
+        "The program's upgrade authority creates the Config at [\"config\"], once."
+      ],
+      "discriminator": [
+        208,
+        127,
+        21,
+        1,
+        194,
+        190,
+        196,
+        70
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The program's upgrade authority (its ProgramData's upgrade_authority_address); pays the",
+            "rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "PDA [\"config\"]: `init`, so it is created once."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program_data",
+          "docs": [
+            "This program's ProgramData account, [\"<program id>\"] under the upgradeable loader."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  12,
+                  225,
+                  89,
+                  43,
+                  176,
+                  180,
+                  163,
+                  124,
+                  7,
+                  88,
+                  199,
+                  191,
+                  145,
+                  5,
+                  84,
+                  23,
+                  104,
+                  255,
+                  147,
+                  248,
+                  120,
+                  148,
+                  106,
+                  103,
+                  13,
+                  193,
+                  31,
+                  27,
+                  125,
+                  180,
+                  10,
+                  84
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                2,
+                168,
+                246,
+                145,
+                78,
+                136,
+                161,
+                176,
+                226,
+                16,
+                21,
+                62,
+                247,
+                99,
+                174,
+                43,
+                0,
+                194,
+                185,
+                61,
+                22,
+                193,
+                36,
+                210,
+                192,
+                83,
+                122,
+                16,
+                4,
+                128,
+                0,
+                0
+              ]
+            }
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "init",
+          "type": {
+            "defined": {
+              "name": "ConfigInit"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "open_escrow",
+      "docs": [
+        "Create the escrow for `competition_id` at the PDA [\"escrow\", sponsor, competition_id], pin",
+        "the mint and its decimals, store the terms (held to EscrowTerms::validate's bounds, the",
+        "bond to bond_floor of the cluster's rent, and to the Config's open policy and caps) and",
+        "rules_sha256, and move `terms.total` from the sponsor into the vault (the vault must grow",
+        "by exactly that much). Classic Token program only."
+      ],
+      "discriminator": [
+        82,
+        178,
+        155,
+        253,
+        74,
+        41,
+        161,
+        219
+      ],
+      "accounts": [
+        {
+          "name": "sponsor",
+          "docs": [
+            "Funds the vault from `sponsor_token_account` and pays the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "PDA [\"escrow\", sponsor, competition_id]: one sponsor cannot open (squat) another's address."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "sponsor"
+              },
+              {
+                "kind": "arg",
+                "path": "competition_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The prize mint, owned by the classic Token program (no Token-2022, so no transfer hook)."
+          ]
+        },
+        {
+          "name": "sponsor_token_account",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "The escrow's associated token account. init_if_needed, so a vault someone created ahead",
+            "of time cannot block the open."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The open policy, the caps (open_value grows by the deposit) and the stop."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "competition_id",
+          "type": {
+            "array": [
+              "u8",
+              16
+            ]
+          }
+        },
+        {
+          "name": "terms",
+          "type": {
+            "defined": {
+              "name": "EscrowTerms"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "post_result",
+      "docs": [
+        "The resolver posts the payout root, the result and kit hashes and the total with its SOL",
+        "bond, at or after final_end and before resolve_deadline, once the entries root is",
+        "committed; 0 < `total` <= the vault balance. Stores the result commitment and opens the",
+        "challenge window (Challengeable)."
+      ],
+      "discriminator": [
+        209,
+        11,
+        193,
+        110,
+        192,
+        1,
+        142,
+        9
+      ],
+      "accounts": [
+        {
+          "name": "resolver",
+          "docs": [
+            "Posts the result and pays the SOL bond into the escrow account."
+          ],
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "Read for its balance: the posted total must not exceed it."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The stop clock and the revoked keys."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "payout_root",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "result_sha256",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "kit_sha256",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "total",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "propose_admin",
+      "docs": [
+        "The admin names its successor (accept_admin completes the move)."
+      ],
+      "discriminator": [
+        121,
+        214,
+        199,
+        212,
+        87,
+        39,
+        117,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "new_admin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "refund",
+      "docs": [
+        "Permissionless: sweeps the vault to refund_to and closes it, leaving the escrow Closed and",
+        "the resolver's bond (if still held) returned; challengers' bonds still held wait for",
+        "close_challenge. Allowed when Claimable past claim_deadline (whatever hard_deadline says),",
+        "Open past resolve_deadline, or any other status past hard_deadline, except a Disputed",
+        "escrow whose quorum is recorded (QuorumRecorded): settle applies it, past hard_deadline too."
+      ],
+      "discriminator": [
+        2,
+        96,
+        183,
+        251,
+        63,
+        208,
+        46,
+        46
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the fees and, if needed, refund_to's token account rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "refund_to",
+          "writable": true,
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "refund_to_token_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "refund_to"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "resolver",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The stop clock, the PayoutStop, the guardian's freeze, and the global cap's counter",
+            "(written: the escrow's deposit comes off open_value)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "release_hold",
+      "docs": [
+        "The compliance key releases `claimant`'s hold."
+      ],
+      "discriminator": [
+        106,
+        109,
+        70,
+        162,
+        197,
+        158,
+        92,
+        243
+      ],
+      "accounts": [
+        {
+          "name": "compliance",
+          "signer": true
+        },
+        {
+          "name": "escrow"
+        },
+        {
+          "name": "receipt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  108,
+                  97,
+                  105,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "arg",
+                "path": "claimant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The revoked keys."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "claimant",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "request_claim",
+      "docs": [
+        "The claimant proves its leaf and starts the hold window: with no hold placed before it",
+        "passes, the claim clears without the compliance co-signature. Refused, as claim is, while",
+        "a PayoutStop or the guardian's freeze of the escrow is in force."
+      ],
+      "discriminator": [
+        66,
+        26,
+        55,
+        136,
+        27,
+        129,
+        50,
+        254
+      ],
+      "accounts": [
+        {
+          "name": "claimant",
+          "signer": true
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the receipt's rent; may differ from the claimant."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "escrow"
+        },
+        {
+          "name": "receipt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  108,
+                  97,
+                  105,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "account",
+                "path": "claimant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The stop clock and the revoked keys."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "total_amount",
+          "type": "u64"
+        },
+        {
+          "name": "proof",
+          "type": {
+            "vec": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "rotate_role",
+      "docs": [
+        "The admin replaces an escrow's resolver, compliance key or one regrader."
+      ],
+      "discriminator": [
+        140,
+        30,
+        251,
+        28,
+        138,
+        169,
+        142,
+        215
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "old_attestation",
+          "docs": [
+            "handler): a regrader seat rotates only while it has not voted. Omitted for the resolver",
+            "and the compliance key."
+          ],
+          "optional": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "role",
+          "type": {
+            "defined": {
+              "name": "EscrowRole"
+            }
+          }
+        },
+        {
+          "name": "old",
+          "type": "pubkey"
+        },
+        {
+          "name": "new",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_allowed",
+      "docs": [
+        "The admin adds a key to an allowlist (mints, sponsors, the regrader registry) or takes it",
+        "off."
+      ],
+      "discriminator": [
+        172,
+        134,
+        133,
+        128,
+        12,
+        254,
+        134,
+        112
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "list",
+          "type": {
+            "defined": {
+              "name": "AllowList"
+            }
+          }
+        },
+        {
+          "name": "key",
+          "type": "pubkey"
+        },
+        {
+          "name": "allowed",
+          "type": "bool"
+        },
+        {
+          "name": "house",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_config_role",
+      "docs": [
+        "The admin replaces the guardian or the arbiter with a key that is not revoked."
+      ],
+      "discriminator": [
+        110,
+        167,
+        132,
+        96,
+        196,
+        207,
+        168,
+        48
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "role",
+          "type": {
+            "defined": {
+              "name": "ConfigRole"
+            }
+          }
+        },
+        {
+          "name": "key",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_floors",
+      "docs": [
+        "The admin sets the window floors and the reveal grace."
+      ],
+      "discriminator": [
+        224,
+        144,
+        175,
+        105,
+        55,
+        176,
+        122,
+        152
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "floors",
+          "type": {
+            "defined": {
+              "name": "Floors"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_freeze",
+      "docs": [
+        "The guardian freezes one escrow, for 7 days of the global clock; the admin unfreezes it."
+      ],
+      "discriminator": [
+        202,
+        80,
+        109,
+        208,
+        130,
+        144,
+        26,
+        233
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "frozen",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_limits",
+      "docs": [
+        "The admin sets the caps, the flow bucket, min_bond and max_house_regraders."
+      ],
+      "discriminator": [
+        207,
+        50,
+        250,
+        67,
+        211,
+        33,
+        70,
+        91
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "limits",
+          "type": {
+            "defined": {
+              "name": "Limits"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_min_regraders",
+      "docs": [
+        "The admin sets the panel floor: the fewest regraders (1 to MAX_REGRADERS) an escrow opened",
+        "after it may name."
+      ],
+      "discriminator": [
+        159,
+        108,
+        11,
+        170,
+        249,
+        119,
+        212,
+        4
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "min_regraders",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "set_revoked",
+      "docs": [
+        "The guardian revokes a key (refused everywhere after); the admin unrevokes it."
+      ],
+      "discriminator": [
+        114,
+        134,
+        192,
+        190,
+        128,
+        96,
+        174,
+        147
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "key",
+          "type": "pubkey"
+        },
+        {
+          "name": "revoked",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_stop",
+      "docs": [
+        "The guardian raises the stop (Normal, IntakeStop, PayoutStop), for 7 days, or until the",
+        "later lapse of the stop in force; the admin sets any level, Normal included."
+      ],
+      "discriminator": [
+        231,
+        201,
+        169,
+        101,
+        182,
+        97,
+        251,
+        98
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "level",
+          "type": {
+            "defined": {
+              "name": "StopState"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "settle",
+      "docs": [
+        "Permissionless, never before challenge_deadline (nor before the reveal grace ends while a",
+        "commit is pending): ends an unchallenged window (Claimable) or a dispute: Claimable on the",
+        "posted result's quorum, Claimable on the winning challenge's alternative (applied) on its",
+        "quorum once attest_deadline (challenge_deadline + attest_window) is reached, Frozen on no",
+        "quorum by attest_deadline. The winning side takes every bond."
+      ],
+      "discriminator": [
+        175,
+        42,
+        185,
+        87,
+        144,
+        131,
+        102,
+        212
+      ],
+      "accounts": [
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "Read for its balance: an alternative a quorum applies must not total more than it holds."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "resolver",
+          "docs": [
+            "Its bond back, and every challenger's too when the posted result stands."
+          ],
+          "writable": true
+        },
+        {
+          "name": "challenger",
+          "docs": [
+            "the regraders' quorum backed (attest recorded it). Every bond when that alternative is",
+            "applied; omitted when no alternative won, and may be whenever nothing is paid to it."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The stop clock, the PayoutStop and the guardian's freeze."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Attestation",
+      "discriminator": [
+        152,
+        125,
+        183,
+        86,
+        36,
+        146,
+        121,
+        73
+      ]
+    },
+    {
+      "name": "ChallengeRecord",
+      "discriminator": [
+        226,
+        106,
+        205,
+        134,
+        142,
+        29,
+        8,
+        81
+      ]
+    },
+    {
+      "name": "ClaimReceipt",
+      "discriminator": [
+        223,
+        233,
+        11,
+        229,
+        124,
+        165,
+        207,
+        28
+      ]
+    },
+    {
+      "name": "CommitRecord",
+      "discriminator": [
+        80,
+        209,
+        175,
+        51,
+        87,
+        253,
+        14,
+        115
+      ]
+    },
+    {
+      "name": "Config",
+      "discriminator": [
+        155,
+        12,
+        170,
+        224,
+        30,
+        250,
+        204,
+        130
+      ]
+    },
+    {
+      "name": "Escrow",
+      "discriminator": [
+        31,
+        213,
+        123,
+        187,
+        186,
+        22,
+        218,
+        155
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "ArbiterResolved",
+      "discriminator": [
+        236,
+        65,
+        251,
+        245,
+        173,
+        76,
+        28,
+        17
+      ]
+    },
+    {
+      "name": "AttestationClosed",
+      "discriminator": [
+        126,
+        45,
+        96,
+        171,
+        16,
+        201,
+        11,
+        78
+      ]
+    },
+    {
+      "name": "Attested",
+      "discriminator": [
+        184,
+        102,
+        113,
+        199,
+        220,
+        197,
+        96,
+        50
+      ]
+    },
+    {
+      "name": "ChallengeClosed",
+      "discriminator": [
+        228,
+        8,
+        12,
+        154,
+        182,
+        5,
+        139,
+        91
+      ]
+    },
+    {
+      "name": "ChallengeCommitted",
+      "discriminator": [
+        9,
+        193,
+        212,
+        45,
+        186,
+        7,
+        56,
+        128
+      ]
+    },
+    {
+      "name": "Challenged",
+      "discriminator": [
+        208,
+        48,
+        104,
+        229,
+        231,
+        85,
+        175,
+        193
+      ]
+    },
+    {
+      "name": "ClaimRequested",
+      "discriminator": [
+        204,
+        141,
+        47,
+        39,
+        51,
+        65,
+        169,
+        32
+      ]
+    },
+    {
+      "name": "Claimed",
+      "discriminator": [
+        217,
+        192,
+        123,
+        72,
+        108,
+        150,
+        248,
+        33
+      ]
+    },
+    {
+      "name": "CommitClosed",
+      "discriminator": [
+        220,
+        214,
+        94,
+        129,
+        187,
+        131,
+        129,
+        147
+      ]
+    },
+    {
+      "name": "ConfigChanged",
+      "discriminator": [
+        147,
+        25,
+        86,
+        98,
+        98,
+        77,
+        78,
+        192
+      ]
+    },
+    {
+      "name": "EntriesCommitted",
+      "discriminator": [
+        196,
+        142,
+        45,
+        95,
+        38,
+        114,
+        108,
+        202
+      ]
+    },
+    {
+      "name": "Escalated",
+      "discriminator": [
+        153,
+        201,
+        57,
+        104,
+        173,
+        28,
+        97,
+        244
+      ]
+    },
+    {
+      "name": "EscrowFunded",
+      "discriminator": [
+        228,
+        243,
+        166,
+        74,
+        22,
+        167,
+        157,
+        244
+      ]
+    },
+    {
+      "name": "EscrowOpened",
+      "discriminator": [
+        201,
+        42,
+        96,
+        8,
+        123,
+        9,
+        212,
+        164
+      ]
+    },
+    {
+      "name": "FreezeChanged",
+      "discriminator": [
+        244,
+        217,
+        48,
+        229,
+        16,
+        141,
+        88,
+        133
+      ]
+    },
+    {
+      "name": "HoldPlaced",
+      "discriminator": [
+        188,
+        90,
+        170,
+        2,
+        166,
+        153,
+        108,
+        121
+      ]
+    },
+    {
+      "name": "HoldReleased",
+      "discriminator": [
+        168,
+        49,
+        116,
+        33,
+        191,
+        86,
+        197,
+        90
+      ]
+    },
+    {
+      "name": "ReceiptClosed",
+      "discriminator": [
+        127,
+        232,
+        161,
+        69,
+        46,
+        187,
+        159,
+        188
+      ]
+    },
+    {
+      "name": "Refunded",
+      "discriminator": [
+        35,
+        103,
+        149,
+        246,
+        196,
+        123,
+        221,
+        99
+      ]
+    },
+    {
+      "name": "ResultPosted",
+      "discriminator": [
+        82,
+        92,
+        231,
+        184,
+        57,
+        147,
+        106,
+        5
+      ]
+    },
+    {
+      "name": "RevocationChanged",
+      "discriminator": [
+        97,
+        69,
+        178,
+        102,
+        56,
+        79,
+        161,
+        157
+      ]
+    },
+    {
+      "name": "RoleRotated",
+      "discriminator": [
+        133,
+        153,
+        246,
+        25,
+        93,
+        231,
+        156,
+        124
+      ]
+    },
+    {
+      "name": "Settled",
+      "discriminator": [
+        232,
+        210,
+        40,
+        17,
+        142,
+        124,
+        145,
+        238
+      ]
+    },
+    {
+      "name": "StopChanged",
+      "discriminator": [
+        35,
+        165,
+        220,
+        121,
+        182,
+        135,
+        152,
+        102
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "UnauthorizedResolver",
+      "msg": "The signer is not this escrow's resolver"
+    },
+    {
+      "code": 6001,
+      "name": "UnauthorizedArbiter",
+      "msg": "The signer is not this escrow's arbiter"
+    },
+    {
+      "code": 6002,
+      "name": "NotARegrader",
+      "msg": "The signer is not one of this escrow's regraders"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidStatus",
+      "msg": "The escrow's status does not allow this instruction"
+    },
+    {
+      "code": 6004,
+      "name": "ChallengeWindowClosed",
+      "msg": "The challenge window has closed"
+    },
+    {
+      "code": 6005,
+      "name": "ClaimWindowClosed",
+      "msg": "The claim window has closed"
+    },
+    {
+      "code": 6006,
+      "name": "ClaimWindowNotElapsed",
+      "msg": "The claim window has not elapsed yet"
+    },
+    {
+      "code": 6007,
+      "name": "DeadlineNotReached",
+      "msg": "The deadline this instruction waits for has not been reached"
+    },
+    {
+      "code": 6008,
+      "name": "AttestWindowOpen",
+      "msg": "The attestation window is still open"
+    },
+    {
+      "code": 6009,
+      "name": "AttestWindowClosed",
+      "msg": "The attestation window has closed"
+    },
+    {
+      "code": 6010,
+      "name": "Underfunded",
+      "msg": "The vault holds less than the escrow total"
+    },
+    {
+      "code": 6011,
+      "name": "Overfunded",
+      "msg": "The vault holds more than the escrow total"
+    },
+    {
+      "code": 6012,
+      "name": "TotalMismatch",
+      "msg": "The total is zero or more than the vault holds"
+    },
+    {
+      "code": 6013,
+      "name": "InvalidMerkleProof",
+      "msg": "The merkle proof does not verify against the payout root"
+    },
+    {
+      "code": 6014,
+      "name": "ProofTooDeep",
+      "msg": "The merkle proof is longer than MAX_PROOF_LEN"
+    },
+    {
+      "code": 6015,
+      "name": "AlreadyClaimed",
+      "msg": "This allocation has already been claimed in full"
+    },
+    {
+      "code": 6016,
+      "name": "ExceedsAllocation",
+      "msg": "The amount exceeds what is left of this allocation"
+    },
+    {
+      "code": 6017,
+      "name": "NothingToClaim",
+      "msg": "Nothing is left to claim"
+    },
+    {
+      "code": 6018,
+      "name": "MintMismatch",
+      "msg": "The mint is not this escrow's mint"
+    },
+    {
+      "code": 6019,
+      "name": "DecimalsMismatch",
+      "msg": "The mint's decimals do not match the escrow's"
+    },
+    {
+      "code": 6020,
+      "name": "UnsupportedTokenProgram",
+      "msg": "Only the classic SPL Token program is supported"
+    },
+    {
+      "code": 6021,
+      "name": "BondMismatch",
+      "msg": "The bond is not the escrow's bond amount"
+    },
+    {
+      "code": 6022,
+      "name": "InvalidResultHash",
+      "msg": "The result hash is not one this instruction accepts"
+    },
+    {
+      "code": 6023,
+      "name": "InvalidRegraderSet",
+      "msg": "The regrader set is invalid: it needs 1 <= k <= n <= 5, 2k > n and distinct keys"
+    },
+    {
+      "code": 6024,
+      "name": "NoQuorum",
+      "msg": "Neither result has reached the quorum"
+    },
+    {
+      "code": 6025,
+      "name": "MathOverflow",
+      "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6026,
+      "name": "EscrowClosed",
+      "msg": "The escrow is closed"
+    },
+    {
+      "code": 6027,
+      "name": "NothingToRefund",
+      "msg": "The vault is empty: nothing to refund"
+    },
+    {
+      "code": 6028,
+      "name": "HeldForCompliance",
+      "msg": "This claim is held for compliance"
+    },
+    {
+      "code": 6029,
+      "name": "NotCleared",
+      "msg": "The claim is not cleared: it needs the compliance co-signature, or a request whose hold window has passed"
+    },
+    {
+      "code": 6030,
+      "name": "HoldWindowOpen",
+      "msg": "The hold window after the claim request has not passed yet"
+    },
+    {
+      "code": 6031,
+      "name": "EntriesAlreadyCommitted",
+      "msg": "The entries root has already been committed"
+    },
+    {
+      "code": 6032,
+      "name": "UnauthorizedSponsor",
+      "msg": "The signer is not this escrow's sponsor"
+    },
+    {
+      "code": 6033,
+      "name": "UnauthorizedCompliance",
+      "msg": "The signer is not this escrow's compliance key"
+    },
+    {
+      "code": 6034,
+      "name": "InvalidDeadlines",
+      "msg": "The deadlines must be in the future and in order: entries deadline <= final end < resolve deadline"
+    },
+    {
+      "code": 6035,
+      "name": "InvalidWindow",
+      "msg": "A window is below its minimum or above MAX_WINDOW"
+    },
+    {
+      "code": 6036,
+      "name": "InvalidAmount",
+      "msg": "The amount must be greater than zero"
+    },
+    {
+      "code": 6037,
+      "name": "InvalidHoldReason",
+      "msg": "The hold reason is not one of sanctions, geo, tax form required or review"
+    },
+    {
+      "code": 6038,
+      "name": "EntriesWindowClosed",
+      "msg": "The entries deadline has passed"
+    },
+    {
+      "code": 6039,
+      "name": "ResolveWindowClosed",
+      "msg": "The resolve deadline has passed"
+    },
+    {
+      "code": 6040,
+      "name": "NotHeld",
+      "msg": "This claim is not held"
+    },
+    {
+      "code": 6041,
+      "name": "AlreadyRequested",
+      "msg": "This claim has already been requested"
+    },
+    {
+      "code": 6042,
+      "name": "FinalNotEnded",
+      "msg": "The competition's final phase has not ended yet"
+    },
+    {
+      "code": 6043,
+      "name": "EntriesNotCommitted",
+      "msg": "The entries root has not been committed"
+    },
+    {
+      "code": 6044,
+      "name": "ClaimWindowTooShort",
+      "msg": "With a compliance key, the claim window must be longer than the hold window"
+    },
+    {
+      "code": 6045,
+      "name": "HardDeadlineTooEarly",
+      "msg": "The hard deadline must be at least every window and ARBITER_SLACK after the resolve deadline"
+    },
+    {
+      "code": 6046,
+      "name": "BondBelowFloor",
+      "msg": "The bond is below the floor: BOND_FLOOR_RENTS times the rent-exempt minimum of an empty account"
+    },
+    {
+      "code": 6047,
+      "name": "ChallengeMismatch",
+      "msg": "The challenge account is not this escrow's challenge of that commitment, or its challenger account is not its challenger"
+    },
+    {
+      "code": 6048,
+      "name": "AlternativeUnbacked",
+      "msg": "No named regrader voted for this alternative: the arbiter chooses the posted result or an alternative a regrader backed"
+    },
+    {
+      "code": 6049,
+      "name": "NotUpgradeAuthority",
+      "msg": "Only the program's upgrade authority can initialise the config"
+    },
+    {
+      "code": 6050,
+      "name": "UnauthorizedAdmin",
+      "msg": "The signer is not the config's admin"
+    },
+    {
+      "code": 6051,
+      "name": "UnauthorizedGuardian",
+      "msg": "The signer is neither the config's guardian nor its admin"
+    },
+    {
+      "code": 6052,
+      "name": "NotPendingAdmin",
+      "msg": "The signer is not the admin the config's admin proposed"
+    },
+    {
+      "code": 6053,
+      "name": "InvalidConfig",
+      "msg": "A config value is out of bounds"
+    },
+    {
+      "code": 6054,
+      "name": "KeyRevoked",
+      "msg": "This key is revoked: its signature is refused everywhere until the admin unrevokes it"
+    },
+    {
+      "code": 6055,
+      "name": "CannotRevokeAdmin",
+      "msg": "The admin's key cannot be revoked"
+    },
+    {
+      "code": 6056,
+      "name": "AlreadyRevoked",
+      "msg": "This key is already revoked"
+    },
+    {
+      "code": 6057,
+      "name": "NotRevoked",
+      "msg": "This key is not revoked"
+    },
+    {
+      "code": 6058,
+      "name": "ListFull",
+      "msg": "The list is full"
+    },
+    {
+      "code": 6059,
+      "name": "AlreadyListed",
+      "msg": "The key is already on the list"
+    },
+    {
+      "code": 6060,
+      "name": "NotListed",
+      "msg": "The key is not on the list"
+    },
+    {
+      "code": 6061,
+      "name": "IntakeStopped",
+      "msg": "Intake is stopped: open_escrow and fund are refused until the stop is lifted or lapses"
+    },
+    {
+      "code": 6062,
+      "name": "PayoutStopped",
+      "msg": "Payouts are stopped: claim, refund, settle and arbiter_resolve are refused until the stop is lifted or lapses"
+    },
+    {
+      "code": 6063,
+      "name": "EscrowFrozen",
+      "msg": "The guardian has frozen this escrow: claim, refund, settle and arbiter_resolve are refused until the admin unfreezes it or the freeze lapses"
+    },
+    {
+      "code": 6064,
+      "name": "NotAnEscalation",
+      "msg": "The guardian may only raise the stop level"
+    },
+    {
+      "code": 6065,
+      "name": "NotStopped",
+      "msg": "No stop is in force"
+    },
+    {
+      "code": 6066,
+      "name": "AlreadyFrozen",
+      "msg": "This escrow is already frozen"
+    },
+    {
+      "code": 6067,
+      "name": "NotFrozen",
+      "msg": "This escrow is not frozen"
+    },
+    {
+      "code": 6068,
+      "name": "MintNotAllowed",
+      "msg": "The mint is not on the config's mint allowlist"
+    },
+    {
+      "code": 6069,
+      "name": "SponsorNotAllowed",
+      "msg": "The sponsor is not on the config's sponsor allowlist"
+    },
+    {
+      "code": 6070,
+      "name": "RefundToNotSponsor",
+      "msg": "refund_to must be the sponsor"
+    },
+    {
+      "code": 6071,
+      "name": "ArbiterNotConfig",
+      "msg": "The arbiter must be the config's arbiter"
+    },
+    {
+      "code": 6072,
+      "name": "ComplianceRequired",
+      "msg": "A compliance key is required"
+    },
+    {
+      "code": 6073,
+      "name": "BondBelowMin",
+      "msg": "The bond is below the config's minimum bond"
+    },
+    {
+      "code": 6074,
+      "name": "WindowBelowFloor",
+      "msg": "A window is below the config's floor for it"
+    },
+    {
+      "code": 6075,
+      "name": "RegraderNotRegistered",
+      "msg": "A regrader is not in the config's regrader registry"
+    },
+    {
+      "code": 6076,
+      "name": "TooManyHouseRegraders",
+      "msg": "More house regraders than the config allows"
+    },
+    {
+      "code": 6077,
+      "name": "RegraderNotIndependent",
+      "msg": "The resolver and the compliance key cannot be regraders"
+    },
+    {
+      "code": 6078,
+      "name": "EscrowCapExceeded",
+      "msg": "The escrow would hold more than the config's per-escrow cap"
+    },
+    {
+      "code": 6079,
+      "name": "GlobalCapExceeded",
+      "msg": "Open escrows would hold more than the config's global cap"
+    },
+    {
+      "code": 6080,
+      "name": "FlowLimitExceeded",
+      "msg": "The claim is over what the flow limit allows now: claim less, or wait for the bucket to refill"
+    },
+    {
+      "code": 6081,
+      "name": "VaultFrozen",
+      "msg": "The escrow's vault token account is frozen by the mint's freeze authority"
+    },
+    {
+      "code": 6082,
+      "name": "ClaimantAccountFrozen",
+      "msg": "The claimant's token account is frozen by the mint's freeze authority"
+    },
+    {
+      "code": 6083,
+      "name": "RefundAccountFrozen",
+      "msg": "refund_to's token account is frozen by the mint's freeze authority"
+    },
+    {
+      "code": 6084,
+      "name": "SponsorAccountFrozen",
+      "msg": "The sponsor's token account is frozen by the mint's freeze authority"
+    },
+    {
+      "code": 6085,
+      "name": "CommitMismatch",
+      "msg": "The reveal does not match the commit: sha256(alt_commitment || challenger || salt) differs"
+    },
+    {
+      "code": 6086,
+      "name": "RevealTooEarly",
+      "msg": "A reveal must land in a slot after its commit's"
+    },
+    {
+      "code": 6087,
+      "name": "RevealWindowClosed",
+      "msg": "The reveal window (challenge_deadline + reveal_grace) has closed"
+    },
+    {
+      "code": 6088,
+      "name": "CommitsPendingReveal",
+      "msg": "A committed challenge may still be revealed: settle waits for challenge_deadline + reveal_grace"
+    },
+    {
+      "code": 6089,
+      "name": "RoleMismatch",
+      "msg": "The key is not this escrow's holder of that role"
+    },
+    {
+      "code": 6090,
+      "name": "RegraderAlreadyVoted",
+      "msg": "This regrader has already voted: its seat cannot be rotated"
+    },
+    {
+      "code": 6091,
+      "name": "QuorumRecorded",
+      "msg": "The dispute's quorum is recorded and binds: settle applies it, so the escrow is never refunded from Disputed, nor escalated once settle may apply it"
+    },
+    {
+      "code": 6092,
+      "name": "OverturnWindowOpen",
+      "msg": "An alternative a quorum backed overturns the posted result only once the attest window has ended (attest_deadline): until then the guardian may escalate it to the arbiter"
+    },
+    {
+      "code": 6093,
+      "name": "RoleIsEscrow",
+      "msg": "The resolver and the compliance key cannot be the escrow's own address, which never signs"
+    },
+    {
+      "code": 6094,
+      "name": "NoEntries",
+      "msg": "An entries root commits at least one entry: entries_count is zero"
+    },
+    {
+      "code": 6095,
+      "name": "UnchallengedResultBinds",
+      "msg": "The posted result's challenge window is over with no challenge: the result binds (settle makes it Claimable), so it is no longer escalated"
+    },
+    {
+      "code": 6096,
+      "name": "PanelTooSmall",
+      "msg": "The escrow names fewer regraders than the config's min_regraders"
+    }
+  ],
+  "types": [
+    {
+      "name": "AllowList",
+      "docs": [
+        "Which allowlist set_allowed edits."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Mint"
+          },
+          {
+            "name": "Sponsor"
+          },
+          {
+            "name": "Regrader"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ArbiterChoice",
+      "docs": [
+        "Which result arbiter_resolve applies to a Frozen escrow: the arbiter picks a side, it never",
+        "writes a result of its own."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Posted"
+          },
+          {
+            "name": "Alternative"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ArbiterResolved",
+      "docs": [
+        "arbiter_resolve: the arbiter chose which result of a Frozen escrow applies, the posted one or",
+        "one challenge's."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "arbiter",
+            "type": "pubkey"
+          },
+          {
+            "name": "choice",
+            "type": {
+              "defined": {
+                "name": "ArbiterChoice"
+              }
+            }
+          },
+          {
+            "name": "payout_root",
+            "docs": [
+              "The chosen side's result, now in force."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "result_sha256",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "total",
+            "type": "u64"
+          },
+          {
+            "name": "commitment",
+            "docs": [
+              "result_commitment(result_sha256, payout_root, total): the chosen (winning) commitment."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "challenge",
+            "docs": [
+              "The chosen Challenge PDA; Pubkey::default() when the posted result was chosen."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "challenger",
+            "docs": [
+              "Its challenger; Pubkey::default() when the posted result was chosen."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "claim_deadline",
+            "type": "i64"
+          },
+          {
+            "name": "resolver_paid",
+            "docs": [
+              "Lamports paid to the resolver (every bond when the posted result was chosen; 0 otherwise)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "challenger_paid",
+            "docs": [
+              "Lamports paid to the chosen challenger (every bond when it was chosen; 0 otherwise)."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AttestSide",
+      "docs": [
+        "Which result an attestation backs."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Result"
+          },
+          {
+            "name": "Alt"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Attestation",
+      "docs": [
+        "One regrader's vote in a dispute. PDA: `[\"attestation\", escrow, regrader]`, so each regrader",
+        "votes once per escrow. The regrader pays its rent; close_attestation returns it to the",
+        "regrader once the escrow is Closed, when no instruction reads a vote any more."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "regrader",
+            "docs": [
+              "The regrader who voted and paid the rent (a PDA seed): close_attestation's rent goes to it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "commitment",
+            "docs": [
+              "The result commitment the regrader rebuilt (document hash, payout root and total): the",
+              "posted one (Result) or one challenge's (Alt)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "side",
+            "type": {
+              "defined": {
+                "name": "AttestSide"
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AttestationClosed",
+      "docs": [
+        "close_attestation: a vote's Attestation was closed once its escrow was Closed, its rent",
+        "returned to its regrader."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "attestation",
+            "type": "pubkey"
+          },
+          {
+            "name": "regrader",
+            "type": "pubkey"
+          },
+          {
+            "name": "commitment",
+            "docs": [
+              "The commitment the vote named, and its side."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "side",
+            "type": {
+              "defined": {
+                "name": "AttestSide"
+              }
+            }
+          },
+          {
+            "name": "rent_returned",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Attested",
+      "docs": [
+        "attest: a regrader voted."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "regrader",
+            "type": "pubkey"
+          },
+          {
+            "name": "commitment",
+            "docs": [
+              "The commitment the regrader backed: the posted one (Result) or one challenge's (Alt)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "side",
+            "type": {
+              "defined": {
+                "name": "AttestSide"
+              }
+            }
+          },
+          {
+            "name": "challenge",
+            "docs": [
+              "The Challenge PDA whose commitment it backed; Pubkey::default() for the posted result."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "votes",
+            "docs": [
+              "The votes its commitment holds now."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "quorum",
+            "docs": [
+              "Whether this vote took its commitment to k: the side that wins, which settle applies."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "votes_result",
+            "type": "u8"
+          },
+          {
+            "name": "votes_alt",
+            "docs": [
+              "Votes for every challenge's commitment together."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ChallengeClosed",
+      "docs": [
+        "close_challenge: a Challenge PDA of a decided or refunded escrow was closed, its rent (and,",
+        "after a refund that decided nothing, its bond) returned to its challenger."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "challenge",
+            "type": "pubkey"
+          },
+          {
+            "name": "challenger",
+            "type": "pubkey"
+          },
+          {
+            "name": "alt_commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "bond_returned",
+            "docs": [
+              "Lamports of its bond returned: only after a refund that decided nothing (once a side",
+              "wins, settle or arbiter_resolve pays every bond to it)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "rent_returned",
+            "docs": [
+              "Lamports of the account's rent returned."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ChallengeCommitted",
+      "docs": [
+        "challenge_commit: a challenger bonded a commit to an alternative it reveals later."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "commit",
+            "docs": [
+              "The CommitRecord PDA, [\"commit\", escrow, challenger, hash]."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "challenger",
+            "type": "pubkey"
+          },
+          {
+            "name": "hash",
+            "docs": [
+              "sha256(alt_commitment || challenger || salt)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "slot",
+            "docs": [
+              "The slot it landed in: its reveal must land in a later one."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "committed_at",
+            "docs": [
+              "The escrow clock when it landed."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bond",
+            "type": "u64"
+          },
+          {
+            "name": "pending_commits",
+            "docs": [
+              "The escrow's commits not yet revealed or closed, this one included."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ChallengeRecord",
+      "docs": [
+        "One challenge of an escrow: a bonded alternative result (document hash, payout root and",
+        "total). PDA: `[\"challenge\", escrow, alt_commitment]`, so an escrow takes one challenge per",
+        "distinct alternative, and a junk challenge never keeps another alternative out. Its bond sits",
+        "in the escrow account with the others (Escrow.challenger_bond); this account holds its rent,",
+        "which close_challenge returns to `challenger` once the dispute is over."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "challenger",
+            "docs": [
+              "Signed the challenge and paid its bond and this account's rent."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "alt_result_sha256",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "alt_payout_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "alt_commitment",
+            "docs": [
+              "result_commitment(alt_result_sha256, alt_payout_root, alt_total): the PDA's seed."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "alt_total",
+            "type": "u64"
+          },
+          {
+            "name": "bond",
+            "docs": [
+              "The lamports of bond it paid (the escrow's bond_lamports)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "opened_at",
+            "docs": [
+              "Unix seconds it landed."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "index",
+            "docs": [
+              "Its place among the escrow's challenges, from 0 (the one that opened the dispute)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "votes",
+            "docs": [
+              "Regraders who voted its commitment."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Challenged",
+      "docs": [
+        "challenge_reveal: a revealed commit's bonded alternative result (document hash, payout root",
+        "and total) opened its Challenge PDA, and the dispute (the first) or joined it (a later one)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "commit",
+            "docs": [
+              "The CommitRecord PDA revealed (and closed)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "challenge",
+            "docs": [
+              "The Challenge PDA, [\"challenge\", escrow, alt_commitment]."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "challenger",
+            "type": "pubkey"
+          },
+          {
+            "name": "commitment",
+            "docs": [
+              "The posted result's commitment."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "alt_result_sha256",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "alt_payout_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "alt_total",
+            "type": "u64"
+          },
+          {
+            "name": "alt_commitment",
+            "docs": [
+              "result_commitment(alt_result_sha256, alt_payout_root, alt_total)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "challenger_bond",
+            "docs": [
+              "This challenge's bond."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "index",
+            "docs": [
+              "Its Challenge.index: 0 for the one that opened the dispute."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "challenge_count",
+            "docs": [
+              "The escrow's challenge_count after it."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "attest_deadline",
+            "docs": [
+              "challenge_deadline + attest_window, set by the first challenge; a later one leaves it."
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ClaimReceipt",
+      "docs": [
+        "One claimant's progress against one escrow. PDA: `[\"claim\", escrow, claimant]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "claimant",
+            "type": "pubkey"
+          },
+          {
+            "name": "total_amount",
+            "docs": [
+              "The leaf amount the claimant proved."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "amount_claimed",
+            "type": "u64"
+          },
+          {
+            "name": "requested_at",
+            "docs": [
+              "Unix seconds of request_claim; 0 when never requested."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "hold_reason",
+            "docs": [
+              "HOLD_NONE, or the HOLD_* reason of the hold in force."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "held_at",
+            "docs": [
+              "Unix seconds the hold in force was placed; 0 when none."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ClaimRequested",
+      "docs": [
+        "request_claim: the claimant proved a leaf and started the hold window."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "claimant",
+            "type": "pubkey"
+          },
+          {
+            "name": "total_amount",
+            "type": "u64"
+          },
+          {
+            "name": "requested_at",
+            "type": "i64"
+          },
+          {
+            "name": "clears_at",
+            "docs": [
+              "requested_at + hold_window: when the claim clears if no hold is placed."
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Claimed",
+      "docs": [
+        "claim: tokens moved from the vault to the claimant."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "claimant",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "amount_claimed",
+            "type": "u64"
+          },
+          {
+            "name": "total_amount",
+            "type": "u64"
+          },
+          {
+            "name": "cosigned",
+            "docs": [
+              "Whether the compliance key co-signed (false: the claim cleared by a lapsed request, or",
+              "the escrow has no compliance gate)."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CommitClosed",
+      "docs": [
+        "close_commit: a commit never revealed was closed once its escrow decided, its bond and rent",
+        "returned to its own challenger."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "commit",
+            "type": "pubkey"
+          },
+          {
+            "name": "challenger",
+            "type": "pubkey"
+          },
+          {
+            "name": "hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "bond_returned",
+            "type": "u64"
+          },
+          {
+            "name": "rent_returned",
+            "type": "u64"
+          },
+          {
+            "name": "pending_commits",
+            "docs": [
+              "The escrow's commits still pending after it."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CommitRecord",
+      "docs": [
+        "A committed challenge, not yet revealed. PDA: `[\"commit\", escrow, challenger, hash]`. Its bond",
+        "sits in the escrow account (Escrow.commit_bond); this account holds its rent. challenge_reveal",
+        "closes it into a ChallengeRecord (its rent back to the challenger); one never revealed is",
+        "closed by close_commit once the escrow has decided, its bond and rent back to its own",
+        "challenger."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "challenger",
+            "docs": [
+              "Signed the commit and paid its bond and this account's rent."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "hash",
+            "docs": [
+              "commit_hash(alt_commitment, challenger, salt)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "slot",
+            "docs": [
+              "The slot it landed in: a reveal must land in a later one."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "committed_at",
+            "docs": [
+              "The escrow clock when it landed."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bond",
+            "docs": [
+              "The lamports of bond it paid (the escrow's bond_lamports)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Config",
+      "docs": [
+        "The program's Config. PDA: `[\"config\"]`. Created once by the upgrade authority; every setter",
+        "is the admin's, except the guardian's escalation verbs (set_stop up, set_freeze on, escalate,",
+        "set_revoked on), which the admin may use too."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "stop",
+            "docs": [
+              "The breaker level as last set; it lapses to Normal at stop_expires_at (stop_level reads it)."
+            ],
+            "type": {
+              "defined": {
+                "name": "StopState"
+              }
+            }
+          },
+          {
+            "name": "max_house_regraders",
+            "docs": [
+              "The most house regraders one escrow may name."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "admin",
+            "docs": [
+              "Sets everything; today the owner's key, later the upgrade multisig vault."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_admin",
+            "docs": [
+              "The key propose_admin named, which accept_admin makes the admin; Pubkey::default() when",
+              "none is pending."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "guardian",
+            "docs": [
+              "The guardian: a separate key, never on the server, that may only escalate."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "arbiter",
+            "docs": [
+              "The arbiter every escrow names and arbiter_resolve answers to; today the owner's key, later",
+              "the multisig vault."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "escrow_cap",
+            "docs": [
+              "C_e, in mint base units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "global_cap",
+            "docs": [
+              "C_g, in mint base units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "open_value",
+            "docs": [
+              "What every escrow not yet refunded deposited (open_escrow and fund add, refund takes away)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "flow_capacity",
+            "type": "u64"
+          },
+          {
+            "name": "flow_period",
+            "type": "i64"
+          },
+          {
+            "name": "flow_level",
+            "docs": [
+              "The bucket as of flow_updated_at (wall time); claim refills it, then takes from it."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "flow_updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "min_bond",
+            "type": "u64"
+          },
+          {
+            "name": "min_challenge_window",
+            "type": "i64"
+          },
+          {
+            "name": "min_attest_window",
+            "type": "i64"
+          },
+          {
+            "name": "min_hold_window",
+            "type": "i64"
+          },
+          {
+            "name": "min_claim_window",
+            "type": "i64"
+          },
+          {
+            "name": "reveal_grace",
+            "type": "i64"
+          },
+          {
+            "name": "stop_since",
+            "docs": [
+              "Wall time the stop in force was set (meaningful while `stop` is not Normal)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "stop_expires_at",
+            "docs": [
+              "Wall time the stop in force lapses."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "stopped_secs",
+            "docs": [
+              "Seconds of every PayoutStop that has ended: G before the one in force."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "mints",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "sponsors",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "regraders",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "RegraderEntry"
+                }
+              }
+            }
+          },
+          {
+            "name": "revoked",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "min_regraders",
+            "docs": [
+              "The fewest regraders an escrow may name (open_escrow's PanelTooSmall): DEFAULT_MIN_REGRADERS",
+              "at initialize_config, 1 to MAX_REGRADERS by set_min_regraders. It takes the first of the",
+              "bytes `reserved` held, so a Config written before it reads 0 here, which refuses no panel",
+              "(every panel names at least one regrader), as 1 does."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Zeroed room for later fields."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                63
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigChange",
+      "docs": [
+        "What a ConfigChanged event records."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Initialized"
+          },
+          {
+            "name": "AdminProposed"
+          },
+          {
+            "name": "AdminAccepted"
+          },
+          {
+            "name": "GuardianSet"
+          },
+          {
+            "name": "ArbiterSet"
+          },
+          {
+            "name": "LimitsSet"
+          },
+          {
+            "name": "FloorsSet"
+          },
+          {
+            "name": "Allowed"
+          },
+          {
+            "name": "Disallowed"
+          },
+          {
+            "name": "MinRegradersSet"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigChanged",
+      "docs": [
+        "Every Config change but the stop and the revocations (StopChanged, RevocationChanged): what",
+        "changed, the key it names, and Config's settings after it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "change",
+            "type": {
+              "defined": {
+                "name": "ConfigChange"
+              }
+            }
+          },
+          {
+            "name": "by",
+            "docs": [
+              "The signer: the upgrade authority (Initialized), the proposed admin (AdminAccepted), or the",
+              "admin."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "key",
+            "docs": [
+              "The key the change names (the new admin, guardian or arbiter, the listed key);",
+              "Pubkey::default() otherwise."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "list",
+            "docs": [
+              "The list it edits (Allowed, Disallowed); None otherwise."
+            ],
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "AllowList"
+                }
+              }
+            }
+          },
+          {
+            "name": "house",
+            "docs": [
+              "The regrader's house flag (Allowed of a regrader); false otherwise."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "guardian",
+            "type": "pubkey"
+          },
+          {
+            "name": "arbiter",
+            "type": "pubkey"
+          },
+          {
+            "name": "escrow_cap",
+            "type": "u64"
+          },
+          {
+            "name": "global_cap",
+            "type": "u64"
+          },
+          {
+            "name": "open_value",
+            "type": "u64"
+          },
+          {
+            "name": "flow_capacity",
+            "type": "u64"
+          },
+          {
+            "name": "flow_period",
+            "type": "i64"
+          },
+          {
+            "name": "min_bond",
+            "type": "u64"
+          },
+          {
+            "name": "max_house_regraders",
+            "type": "u8"
+          },
+          {
+            "name": "min_challenge_window",
+            "type": "i64"
+          },
+          {
+            "name": "min_attest_window",
+            "type": "i64"
+          },
+          {
+            "name": "min_hold_window",
+            "type": "i64"
+          },
+          {
+            "name": "min_claim_window",
+            "type": "i64"
+          },
+          {
+            "name": "reveal_grace",
+            "type": "i64"
+          },
+          {
+            "name": "min_regraders",
+            "docs": [
+              "The panel floor open_escrow holds escrows to (0 on a Config written before the field: it",
+              "refuses no panel, as 1 does)."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigInit",
+      "docs": [
+        "What initialize_config writes: the keys, the limits, the floors and the starting lists."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "guardian",
+            "type": "pubkey"
+          },
+          {
+            "name": "arbiter",
+            "type": "pubkey"
+          },
+          {
+            "name": "limits",
+            "type": {
+              "defined": {
+                "name": "Limits"
+              }
+            }
+          },
+          {
+            "name": "floors",
+            "type": {
+              "defined": {
+                "name": "Floors"
+              }
+            }
+          },
+          {
+            "name": "mints",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "sponsors",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "regraders",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "RegraderEntry"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigRole",
+      "docs": [
+        "Which Config key set_config_role replaces (the admin moves by propose_admin and accept_admin)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Guardian"
+          },
+          {
+            "name": "Arbiter"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EntriesCommitted",
+      "docs": [
+        "commit_entries: the entries root is fixed."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "entries_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "entries_count",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Escalated",
+      "docs": [
+        "escalate: the guardian (or the admin) handed an undecided escrow to the arbiter, Frozen."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "by",
+            "type": "pubkey"
+          },
+          {
+            "name": "from_status",
+            "docs": [
+              "Challengeable (inside its challenge window) or Disputed (before a recorded quorum binds)."
+            ],
+            "type": {
+              "defined": {
+                "name": "EscrowStatus"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Escrow",
+      "docs": [
+        "One competition's prize escrow. PDA: `[\"escrow\", sponsor, competition_id]`. Its vault is the",
+        "associated token account of (this account, mint) under the classic Token program."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "decimals",
+            "type": "u8"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "EscrowStatus"
+              }
+            }
+          },
+          {
+            "name": "k",
+            "docs": [
+              "Attestations needed to settle a dispute."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "n",
+            "docs": [
+              "How many of `regraders` are set."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "competition_id",
+            "docs": [
+              "The competition's 16-byte UUID, a PDA seed after the sponsor."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
+            "name": "sponsor",
+            "docs": [
+              "Opened and funded the escrow; a PDA seed."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "resolver",
+            "type": "pubkey"
+          },
+          {
+            "name": "compliance",
+            "docs": [
+              "Pubkey::default() when there is no compliance gate."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "arbiter",
+            "type": "pubkey"
+          },
+          {
+            "name": "refund_to",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "challenger",
+            "docs": [
+              "The challenger whose alternative won: attest records it when the regraders' votes for its",
+              "commitment reach k, arbiter_resolve when the arbiter chooses it. Pubkey::default() until",
+              "one does, and again once the arbiter keeps the posted result over a recorded one",
+              "(Escrow::clear_alternative): it never names a losing alternative's challenger (every",
+              "challenge's own challenger is in its Challenge PDA)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "rules_sha256",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "entries_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "payout_root",
+            "docs": [
+              "The root claims verify against: the posted one, or the winning alternative's once a quorum",
+              "(settle) or the arbiter (arbiter_resolve) applied it."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "result_sha256",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "kit_sha256",
+            "docs": [
+              "The posted regrade kit's hash; applying an alternative leaves it as posted."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "commitment",
+            "docs": [
+              "result_commitment(result_sha256, payout_root, total) of the result in force (the posted",
+              "one, or the applied alternative's); while Disputed, attest votes Result on it."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "alt_result_sha256",
+            "docs": [
+              "The winning challenge's alternative (the `challenger`'s): its document hash, payout root",
+              "and commitment, copied from its Challenge PDA when its votes reach k or the arbiter",
+              "chooses it; all zero until then, and zeroed again with `challenger` when the arbiter keeps",
+              "the posted result instead. attest votes Alt on a Challenge's alt_commitment."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "alt_payout_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "alt_commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "entries_count",
+            "type": "u32"
+          },
+          {
+            "name": "challenge_count",
+            "docs": [
+              "Challenges opened, each its own Challenge PDA (Challenge.index counts from 0)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "total",
+            "docs": [
+              "The pot in mint base units: the opened deposit until post_result, then the posted (or the",
+              "applied alternative's) total, at most the vault balance, which caps what all claims take",
+              "together."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_claimed",
+            "type": "u64"
+          },
+          {
+            "name": "alt_total",
+            "docs": [
+              "The winning challenge's alternative total; 0 until one wins (and again once the arbiter",
+              "keeps the posted result over it)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bond_lamports",
+            "docs": [
+              "The bond, in lamports, a result or a challenge must post."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "resolver_bond",
+            "docs": [
+              "Lamports of the resolver's bond held in this account."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "challenger_bond",
+            "docs": [
+              "Lamports of every challenger's bond held in this account (bond_lamports per challenge): all",
+              "of them go to the winning side when settle or the arbiter decides the dispute; a refund",
+              "that decided nothing leaves them for close_challenge to return, each to its payer."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "entries_deadline",
+            "type": "i64"
+          },
+          {
+            "name": "final_end",
+            "docs": [
+              "The final phase's end: post_result lands at or after it."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "resolve_deadline",
+            "type": "i64"
+          },
+          {
+            "name": "challenge_window",
+            "type": "i64"
+          },
+          {
+            "name": "attest_window",
+            "type": "i64"
+          },
+          {
+            "name": "hold_window",
+            "type": "i64"
+          },
+          {
+            "name": "claim_window",
+            "type": "i64"
+          },
+          {
+            "name": "challenge_deadline",
+            "type": "i64"
+          },
+          {
+            "name": "attest_deadline",
+            "type": "i64"
+          },
+          {
+            "name": "claim_deadline",
+            "type": "i64"
+          },
+          {
+            "name": "hard_deadline",
+            "type": "i64"
+          },
+          {
+            "name": "votes_result",
+            "docs": [
+              "Regraders who voted the posted commitment."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "votes_alt",
+            "docs": [
+              "Regraders who voted a challenge's commitment, every challenge together (each Challenge",
+              "counts its own)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "regraders",
+            "docs": [
+              "The first `n` slots are the regraders; the rest are Pubkey::default()."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                5
+              ]
+            }
+          },
+          {
+            "name": "deposited",
+            "docs": [
+              "What open_escrow and fund moved into the vault: held to Config.escrow_cap, and what refund",
+              "takes back off Config.open_value."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "stop_base",
+            "docs": [
+              "Config's global stopped seconds (G) when the escrow opened: only a PayoutStop after it",
+              "stops this escrow's clock (config::escrow_now)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "freeze_since",
+            "docs": [
+              "The global clock (Γ) when the guardian's freeze in force began; 0 with none."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "freeze_until",
+            "docs": [
+              "The global clock (Γ) at which that freeze lapses; 0 with no freeze on record."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "frozen_secs",
+            "docs": [
+              "Seconds (on the global clock) of every freeze that has ended."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "reveal_grace",
+            "docs": [
+              "Seconds after challenge_deadline a committed challenge may still be revealed (Config's",
+              "reveal_grace at open)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "commit_bond",
+            "docs": [
+              "Lamports of the bonds of commits not yet revealed, held in this account apart from the",
+              "challenge bonds: close_commit returns each to its own challenger."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pending_commits",
+            "docs": [
+              "Commits not yet revealed or closed: settle waits for challenge_deadline + reveal_grace",
+              "while any could still be revealed."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Zeroed room for later fields."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "EscrowFunded",
+      "docs": [
+        "fund: the sponsor topped up the vault."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "sponsor",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "vault_balance",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EscrowOpened",
+      "docs": [
+        "open_escrow: the escrow exists and its vault holds `total`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "competition_id",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
+            "name": "sponsor",
+            "type": "pubkey"
+          },
+          {
+            "name": "resolver",
+            "type": "pubkey"
+          },
+          {
+            "name": "compliance",
+            "type": "pubkey"
+          },
+          {
+            "name": "arbiter",
+            "type": "pubkey"
+          },
+          {
+            "name": "refund_to",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "decimals",
+            "type": "u8"
+          },
+          {
+            "name": "total",
+            "type": "u64"
+          },
+          {
+            "name": "rules_sha256",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "regraders",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "k",
+            "type": "u8"
+          },
+          {
+            "name": "bond_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "entries_deadline",
+            "type": "i64"
+          },
+          {
+            "name": "final_end",
+            "type": "i64"
+          },
+          {
+            "name": "resolve_deadline",
+            "type": "i64"
+          },
+          {
+            "name": "challenge_window",
+            "type": "i64"
+          },
+          {
+            "name": "attest_window",
+            "type": "i64"
+          },
+          {
+            "name": "hold_window",
+            "type": "i64"
+          },
+          {
+            "name": "claim_window",
+            "type": "i64"
+          },
+          {
+            "name": "hard_deadline",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EscrowRole",
+      "docs": [
+        "Which of an escrow's keys rotate_role replaces."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Resolver"
+          },
+          {
+            "name": "Compliance"
+          },
+          {
+            "name": "Regrader"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EscrowStatus",
+      "docs": [
+        "Where an escrow is in its life. Every instruction names the statuses it accepts.",
+        "",
+        "post_result moves Open to Challengeable. From there settle (no challenge) makes it Claimable,",
+        "or the first challenge makes it Disputed (later ones, each a distinct alternative, join the",
+        "dispute), which settle ends as Claimable (the side a quorum of regraders backed applies) or",
+        "Frozen (no quorum). arbiter_resolve moves Frozen to Claimable on the side it chooses, and",
+        "refund moves any status to Closed."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "Challengeable"
+          },
+          {
+            "name": "Disputed"
+          },
+          {
+            "name": "Claimable"
+          },
+          {
+            "name": "Frozen"
+          },
+          {
+            "name": "Closed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EscrowTerms",
+      "docs": [
+        "The terms open_escrow fixes for the escrow's whole life (the competition id is its own",
+        "argument, because it seeds the PDA with the sponsor)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "total",
+            "docs": [
+              "The prize pot in mint base units, moved into the vault at open."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "rules_sha256",
+            "docs": [
+              "sha256 of the competition's published rules."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "resolver",
+            "docs": [
+              "Commits the entries root and posts the result."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "compliance",
+            "docs": [
+              "Co-signs claims and places holds; Pubkey::default() means no compliance gate."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "arbiter",
+            "docs": [
+              "Resolves a Frozen escrow (a Squads v4 vault PDA, which can only sign through the",
+              "multisig's CPI)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "refund_to",
+            "docs": [
+              "Receives refunds (the vault's leftovers and its rent). A forfeited bond goes to the side",
+              "that won, never here."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "regraders",
+            "docs": [
+              "The pre-named regraders, 1 to MAX_REGRADERS distinct keys; n is their count."
+            ],
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "k",
+            "docs": [
+              "Attestations needed to settle a dispute: 1 <= k <= n and 2k > n."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bond_lamports",
+            "docs": [
+              "The SOL bond (lamports) the resolver posts with a result and a challenger posts with a",
+              "challenge; at least bond_floor (BOND_FLOOR_RENTS rent-exempt minimums of an empty account)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "entries_deadline",
+            "docs": [
+              "Unix seconds: commit_entries must land before it (the final phase's start)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "final_end",
+            "docs": [
+              "Unix seconds: the final phase's end. post_result lands at or after it, never on a",
+              "competition still running."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "resolve_deadline",
+            "docs": [
+              "Unix seconds: post_result must land before it, or the pot can be refunded in full."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "challenge_window",
+            "docs": [
+              "Seconds a posted result stays challengeable (at least MIN_CHALLENGE_WINDOW)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "attest_window",
+            "docs": [
+              "Seconds regraders have to attest once the challenge window has closed (at least",
+              "MIN_ATTEST_WINDOW): attest_deadline is challenge_deadline + attest_window, set by the first",
+              "challenge however early in the challenge window it lands. Regraders may vote from that",
+              "challenge on, until attest_deadline."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "hold_window",
+            "docs": [
+              "Seconds after request_claim before an unheld claim clears without the compliance",
+              "co-signature (at least MIN_HOLD_WINDOW)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "claim_window",
+            "docs": [
+              "Seconds winners have to claim once the escrow is Claimable: at least MIN_CLAIM_WINDOW, and",
+              "longer than hold_window when a compliance key is set."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "hard_deadline",
+            "docs": [
+              "Unix seconds after which anyone may refund an escrow that is not Claimable, whatever its",
+              "status (a Claimable one refunds only after its claim_deadline)."
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Floors",
+      "docs": [
+        "The window floors open_escrow holds the terms to, on top of the compiled minimums, and the",
+        "reveal grace every escrow opened after it takes (set_floors)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "min_challenge_window",
+            "type": "i64"
+          },
+          {
+            "name": "min_attest_window",
+            "type": "i64"
+          },
+          {
+            "name": "min_hold_window",
+            "type": "i64"
+          },
+          {
+            "name": "min_claim_window",
+            "type": "i64"
+          },
+          {
+            "name": "reveal_grace",
+            "docs": [
+              "Seconds after challenge_deadline a challenge committed before it may still be revealed:",
+              "MIN_REVEAL_GRACE to MAX_REVEAL_GRACE."
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FreezeChanged",
+      "docs": [
+        "set_freeze or extend_freeze: the guardian froze an escrow, the admin unfroze it, or the admin",
+        "moved the freeze's lapse."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "by",
+            "type": "pubkey"
+          },
+          {
+            "name": "frozen",
+            "type": "bool"
+          },
+          {
+            "name": "freeze_since",
+            "docs": [
+              "On the global clock: when the freeze in force began and lapses (0 when unfrozen)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "freeze_until",
+            "type": "i64"
+          },
+          {
+            "name": "frozen_secs",
+            "docs": [
+              "Seconds of every freeze that has ended."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "escrow_now",
+            "docs": [
+              "The escrow clock now."
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HoldPlaced",
+      "docs": [
+        "hold: the compliance key held a claimant's claim."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "claimant",
+            "type": "pubkey"
+          },
+          {
+            "name": "reason",
+            "type": "u8"
+          },
+          {
+            "name": "held_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HoldReleased",
+      "docs": [
+        "release_hold: the compliance key released a hold."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "claimant",
+            "type": "pubkey"
+          },
+          {
+            "name": "reason",
+            "docs": [
+              "The reason of the hold that was released."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Limits",
+      "docs": [
+        "The caps, the flow bucket, the bond minimum and the house-regrader allowance (set_limits)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow_cap",
+            "docs": [
+              "C_e: the most one escrow may hold (what open_escrow and fund deposited), in mint base units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "global_cap",
+            "docs": [
+              "C_g: the most every escrow not yet refunded may hold together (Config.open_value)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "flow_capacity",
+            "docs": [
+              "The flow bucket's capacity: the most claims may pay out in a burst."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "flow_period",
+            "docs": [
+              "Seconds the bucket takes to refill from empty to flow_capacity."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "min_bond",
+            "docs": [
+              "The smallest bond_lamports open_escrow accepts (on top of the rent floor)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_house_regraders",
+            "docs": [
+              "The most house regraders one escrow may name (MAX_REGRADERS allows an all-house panel)."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReceiptClosed",
+      "docs": [
+        "close_receipt: a claimant reclaimed a receipt's rent after the escrow closed."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "claimant",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount_claimed",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Refunded",
+      "docs": [
+        "refund: the vault was swept to refund_to and the escrow is Closed."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "refund_to",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "from_status",
+            "docs": [
+              "The status the escrow was refunded from."
+            ],
+            "type": {
+              "defined": {
+                "name": "EscrowStatus"
+              }
+            }
+          },
+          {
+            "name": "resolver_paid",
+            "docs": [
+              "Lamports of the resolver's bond returned to it (a bond no settle or arbiter paid out)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "challenger_bonds_held",
+            "docs": [
+              "Lamports of challengers' bonds left in the escrow for close_challenge to return, each to",
+              "its payer (no side was proven); 0 once a side won."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RegraderEntry",
+      "docs": [
+        "One key of the regrader registry: `house` marks a key the house holds (open_escrow counts them",
+        "against Config.max_house_regraders)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "key",
+            "type": "pubkey"
+          },
+          {
+            "name": "house",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ResultPosted",
+      "docs": [
+        "post_result: the resolver posted the result with its bond."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "resolver",
+            "type": "pubkey"
+          },
+          {
+            "name": "payout_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "result_sha256",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "kit_sha256",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "total",
+            "type": "u64"
+          },
+          {
+            "name": "commitment",
+            "docs": [
+              "result_commitment(result_sha256, payout_root, total)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "resolver_bond",
+            "type": "u64"
+          },
+          {
+            "name": "challenge_deadline",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RevocationChanged",
+      "docs": [
+        "set_revoked: a key's signature is refused everywhere (revoked), or accepted again."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "key",
+            "type": "pubkey"
+          },
+          {
+            "name": "by",
+            "type": "pubkey"
+          },
+          {
+            "name": "revoked",
+            "type": "bool"
+          },
+          {
+            "name": "revoked_count",
+            "docs": [
+              "How many keys are revoked after it."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoleRotated",
+      "docs": [
+        "rotate_role: the admin replaced one of an escrow's keys."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "by",
+            "type": "pubkey"
+          },
+          {
+            "name": "role",
+            "type": {
+              "defined": {
+                "name": "EscrowRole"
+              }
+            }
+          },
+          {
+            "name": "old",
+            "type": "pubkey"
+          },
+          {
+            "name": "new",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SettleOutcome",
+      "docs": [
+        "How settle ended a challenge window or a dispute."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Undisputed"
+          },
+          {
+            "name": "ResultUpheld"
+          },
+          {
+            "name": "AltApplied"
+          },
+          {
+            "name": "NoQuorum"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Settled",
+      "docs": [
+        "settle: the challenge window or the dispute ended."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "outcome",
+            "type": {
+              "defined": {
+                "name": "SettleOutcome"
+              }
+            }
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "EscrowStatus"
+              }
+            }
+          },
+          {
+            "name": "votes_result",
+            "type": "u8"
+          },
+          {
+            "name": "votes_alt",
+            "type": "u8"
+          },
+          {
+            "name": "claim_deadline",
+            "docs": [
+              "Set when the escrow became Claimable; 0 otherwise."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "result_sha256",
+            "docs": [
+              "The result in force after settle, its commitment the winning one: the posted result, or",
+              "the winning challenge's alternative after AltApplied (still the posted one after NoQuorum,",
+              "which no side won, until the arbiter chooses)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "payout_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "total",
+            "type": "u64"
+          },
+          {
+            "name": "commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "challenger",
+            "docs": [
+              "The winning challenge's challenger after AltApplied; Pubkey::default() otherwise."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "resolver_paid",
+            "docs": [
+              "Lamports paid to the resolver (its bond, plus every challenger's after ResultUpheld)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "challenger_paid",
+            "docs": [
+              "Lamports paid to the winning challenger (every bond after AltApplied; 0 otherwise)."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StopChanged",
+      "docs": [
+        "set_stop or extend_stop: the breaker level changed or its lapse moved."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "by",
+            "docs": [
+              "The guardian (escalating) or the admin."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "from",
+            "docs": [
+              "The level in force before."
+            ],
+            "type": {
+              "defined": {
+                "name": "StopState"
+              }
+            }
+          },
+          {
+            "name": "stop",
+            "type": {
+              "defined": {
+                "name": "StopState"
+              }
+            }
+          },
+          {
+            "name": "stop_since",
+            "type": "i64"
+          },
+          {
+            "name": "stop_expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "stopped_secs",
+            "docs": [
+              "Seconds of every PayoutStop that has ended."
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StopState",
+      "docs": [
+        "The breaker level Config holds. The levels are ordered: PayoutStop includes IntakeStop, so the",
+        "guardian, who may only escalate, moves Normal -> IntakeStop -> PayoutStop and never back."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Normal"
+          },
+          {
+            "name": "IntakeStop"
+          },
+          {
+            "name": "PayoutStop"
+          }
+        ]
+      }
+    }
+  ],
+  "constants": [
+    {
+      "name": "ARBITER_SLACK",
+      "docs": [
+        "What open_escrow adds after every window to find the earliest hard_deadline it accepts, in",
+        "seconds: 7 days for a delayed arbiter_resolve (a Squads proposal and its time lock). With",
+        "hard_deadline >= resolve_deadline + challenge + attest + hold + claim windows + this slack, an",
+        "escrow that runs its course on time is Claimable well inside hard_deadline; a later arbiter",
+        "still leaves its claims a whole claim window (refund waits for claim_deadline)."
+      ],
+      "type": "i64",
+      "value": "604800"
+    },
+    {
+      "name": "ATTESTATION_SEED",
+      "docs": [
+        "Seed of an Attestation PDA: `[\"attestation\", escrow, regrader]`."
+      ],
+      "type": "bytes",
+      "value": "[97, 116, 116, 101, 115, 116, 97, 116, 105, 111, 110]"
+    },
+    {
+      "name": "BOND_FLOOR_RENTS",
+      "docs": [
+        "The bond floor, in rent-exempt minimums of an empty account: open_escrow takes a bond_lamports",
+        "of at least BOND_FLOOR_RENTS x Rent::minimum_balance(0) (state::bond_floor), read from the Rent",
+        "sysvar, so the floor follows the cluster's rent. A bond that size is never dust, and any one",
+        "bond paid out leaves its recipient rent-exempt even if it held nothing before."
+      ],
+      "type": "u64",
+      "value": "2"
+    },
+    {
+      "name": "CHALLENGE_SEED",
+      "docs": [
+        "Seed of a Challenge PDA: `[\"challenge\", escrow, alt_commitment]`, so an escrow holds one",
+        "challenge per distinct alternative commitment."
+      ],
+      "type": "bytes",
+      "value": "[99, 104, 97, 108, 108, 101, 110, 103, 101]"
+    },
+    {
+      "name": "CLAIM_SEED",
+      "docs": [
+        "Seed of a ClaimReceipt PDA: `[\"claim\", escrow, claimant]`."
+      ],
+      "type": "bytes",
+      "value": "[99, 108, 97, 105, 109]"
+    },
+    {
+      "name": "COMMIT_SEED",
+      "docs": [
+        "Seed of a CommitRecord PDA: `[\"commit\", escrow, challenger, hash]`, hash being",
+        "`sha256(alt_commitment || challenger || salt)`. The challenger is in the seeds, so a copy of",
+        "someone else's hash lands at another address and never blocks the original."
+      ],
+      "type": "bytes",
+      "value": "[99, 111, 109, 109, 105, 116]"
+    },
+    {
+      "name": "CONFIG_SEED",
+      "docs": [
+        "Seed of the Config PDA: `[\"config\"]`, one per program, created once by the program's upgrade",
+        "authority (initialize_config)."
+      ],
+      "type": "bytes",
+      "value": "[99, 111, 110, 102, 105, 103]"
+    },
+    {
+      "name": "DEFAULT_MIN_REGRADERS",
+      "docs": [
+        "The panel floor a new Config starts with (Config.min_regraders): 1, the smallest panel",
+        "EscrowTerms::validate accepts anyway (owner decision #541: single keys for now). The admin",
+        "raises it with set_min_regraders, up to MAX_REGRADERS, without an upgrade."
+      ],
+      "type": "u8",
+      "value": "1"
+    },
+    {
+      "name": "ESCROW_SEED",
+      "docs": [
+        "Seed of the Escrow PDA: `[\"escrow\", sponsor, competition_id]`, competition_id being the",
+        "competition's 16-byte UUID. The sponsor in the seeds means nobody else can open a sponsor's",
+        "competition first and squat its address."
+      ],
+      "type": "bytes",
+      "value": "[101, 115, 99, 114, 111, 119]"
+    },
+    {
+      "name": "HOLD_GEO",
+      "docs": [
+        "ClaimReceipt.hold_reason: a blocked geography."
+      ],
+      "type": "u8",
+      "value": "2"
+    },
+    {
+      "name": "HOLD_NONE",
+      "docs": [
+        "ClaimReceipt.hold_reason: no hold."
+      ],
+      "type": "u8",
+      "value": "0"
+    },
+    {
+      "name": "HOLD_REVIEW",
+      "docs": [
+        "ClaimReceipt.hold_reason: a manual review."
+      ],
+      "type": "u8",
+      "value": "4"
+    },
+    {
+      "name": "HOLD_SANCTIONS",
+      "docs": [
+        "ClaimReceipt.hold_reason: a sanctions-list match."
+      ],
+      "type": "u8",
+      "value": "1"
+    },
+    {
+      "name": "HOLD_TAX_FORM_REQUIRED",
+      "docs": [
+        "ClaimReceipt.hold_reason: a tax form (W-9) is required before payment."
+      ],
+      "type": "u8",
+      "value": "3"
+    },
+    {
+      "name": "MAX_PROOF_LEN",
+      "docs": [
+        "The longest merkle proof claim and request_claim accept (2^24 leaves)."
+      ],
+      "type": "u8",
+      "value": "24"
+    },
+    {
+      "name": "MAX_REGRADERS",
+      "docs": [
+        "The most regraders an escrow names; Escrow.regraders holds this many slots."
+      ],
+      "type": "u8",
+      "value": "5"
+    },
+    {
+      "name": "MAX_REVEAL_GRACE",
+      "docs": [
+        "The longest reveal grace Config accepts, in seconds: 6 h (30 s under `test-windows`). It stays",
+        "below every attest window open_escrow accepts, so a reveal on the grace's last second still",
+        "leaves the regraders time to vote before attest_deadline."
+      ],
+      "type": "i64",
+      "value": "21600"
+    },
+    {
+      "name": "MAX_WINDOW",
+      "docs": [
+        "The longest window open_escrow accepts, in seconds (i32::MAX, about 68 years): deadline",
+        "arithmetic on any accepted window cannot overflow, and every window fits the server's 32-bit",
+        "*_window_seconds columns."
+      ],
+      "type": "i64",
+      "value": "2147483647"
+    },
+    {
+      "name": "MIN_ATTEST_WINDOW",
+      "docs": [
+        "The shortest attestation window open_escrow accepts, in seconds: 48 h (60 s under",
+        "`test-windows`)."
+      ],
+      "type": "i64",
+      "value": "172800"
+    },
+    {
+      "name": "MIN_CHALLENGE_WINDOW",
+      "docs": [
+        "The shortest challenge window open_escrow accepts, in seconds: 72 h. The `test-windows`",
+        "feature (localnet and devnet builds only) lowers it to 60 s."
+      ],
+      "type": "i64",
+      "value": "259200"
+    },
+    {
+      "name": "MIN_CLAIM_WINDOW",
+      "docs": [
+        "The shortest claim window open_escrow accepts, in seconds: 7 days, so winners always get a",
+        "week to claim before refund may sweep their prizes. The `test-windows` feature lowers it to",
+        "90 s, still longer than that build's 60 s hold window."
+      ],
+      "type": "i64",
+      "value": "604800"
+    },
+    {
+      "name": "MIN_HOLD_WINDOW",
+      "docs": [
+        "The shortest compliance hold window open_escrow accepts, in seconds: 72 h (60 s under",
+        "`test-windows`). A requested claim with no on-chain hold clears once it passes."
+      ],
+      "type": "i64",
+      "value": "259200"
+    },
+    {
+      "name": "MIN_REVEAL_GRACE",
+      "docs": [
+        "The shortest reveal grace Config accepts, in seconds: how long after challenge_deadline a",
+        "challenge committed before it may still be revealed. 5 minutes (5 s under `test-windows`)."
+      ],
+      "type": "i64",
+      "value": "300"
+    },
+    {
+      "name": "RESULT_COMMITMENT_DOMAIN",
+      "docs": [
+        "Domain of the result commitment post_result stores, each challenge seeds its PDA with, and",
+        "attest and arbiter_resolve compare:",
+        "`sha256(RESULT_COMMITMENT_DOMAIN || result_sha256 || payout_root || u64le(total))`",
+        "(state::result_commitment; server/chain/result.ts resultCommitment)."
+      ],
+      "type": "bytes",
+      "value": "[97, 103, 101, 110, 116, 45, 102, 117, 110, 47, 114, 101, 115, 117, 108, 116, 45, 99, 111, 109, 109, 105, 116, 109, 101, 110, 116, 47, 118, 49]"
+    },
+    {
+      "name": "STOP_DURATION",
+      "docs": [
+        "How long one stop (Config's IntakeStop or PayoutStop) or one guardian freeze of an escrow lasts",
+        "before it lapses on its own, in seconds: 7 days. Only the admin extends one in force",
+        "(extend_stop, extend_freeze), but the length is per raise, not a ceiling: once one lapses the",
+        "guardian may raise it again, and so hold the program (or one escrow) for as long as it keeps",
+        "renewing, until the admin replaces or revokes the guardian's key (breakers.rs)."
+      ],
+      "type": "i64",
+      "value": "604800"
+    }
+  ]
+}

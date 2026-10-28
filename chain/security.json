@@ -1,0 +1,10 @@
+{
+  "name": "make.fun prize escrow",
+  "description": "make.fun prize escrow: a funded vault per competition, a bonded and challengeable result, k-of-n regrader attestations, an arbiter, and merkle self-claims",
+  "project_url": "https://make.fun",
+  "contacts": ["email:security@make.fun"],
+  "policy": "Report vulnerabilities privately to security@make.fun, never in a public issue or post.",
+  "preferred_languages": ["en"],
+  "source_code": "https://github.com/ezolabs/prize-escrow",
+  "version": "0.1.0"
+}
