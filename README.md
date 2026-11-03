@@ -15,6 +15,7 @@
   <a href="https://explorer.solana.com/address/sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd"><img alt="Solana mainnet program sHC7T46C…H2MDd" src="https://img.shields.io/badge/Solana%20mainnet-sHC7T46C%E2%80%A6H2MDd-C41C83?logo=solana&logoColor=white"></a>
   <a href="#verify-it-yourself"><img alt="Verifiable build" src="https://img.shields.io/badge/build-verifiable-C41C83"></a>
   <a href="#security"><img alt="Security contact security@make.fun" src="https://img.shields.io/badge/security-security%40make.fun-191419"></a>
+  <a href="LICENSE"><img alt="License Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-191419"></a>
 </p>
 
 ---
@@ -357,6 +358,12 @@ policy           Report vulnerabilities privately to security@make.fun, never in
 source_code      https://github.com/makedotfun/prize-escrow
 source_revision  7a5074181432387ffbe44486389477c9d05143af
 ```
+
+## License
+
+prize-escrow is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
+
+[`chain/programs/prize_escrow/src/merkle.rs`](chain/programs/prize_escrow/src/merkle.rs) adapts code from [solana-foundation/rewards](https://github.com/solana-foundation/rewards), which is under the MIT License. Its copyright and permission notice is kept at the top of that file.
 
 ## Links
 
