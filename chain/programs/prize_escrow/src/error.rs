@@ -202,4 +202,42 @@ pub enum EscrowError {
     UnchallengedResultBinds,
     #[msg("The escrow names fewer regraders than the config's min_regraders")]
     PanelTooSmall,
+    #[msg("Proposals are off: the config names no curator")]
+    ProposalsDisabled,
+    #[msg("The signer is not the config's curator")]
+    UnauthorizedCurator,
+    #[msg("Proposals awaiting review would hold more than the config's pending cap")]
+    PendingCapExceeded,
+    #[msg("The review deadline must be in the future, at most MAX_REVIEW_WINDOW after the submit, and no later than opens_at, which is before the entries deadline")]
+    ReviewWindowInvalid,
+    #[msg("The review deadline has passed: the proposal can only be returned")]
+    ReviewWindowClosed,
+    #[msg("The sponsor is revoked: its proposal is held, neither approved nor returned, until the admin unrevokes it")]
+    SponsorRevoked,
+    #[msg("An escrow already exists at this sponsor's competition id")]
+    EscrowExists,
+    #[msg("The curator must be a key of its own: not the admin, the guardian or the arbiter")]
+    CuratorNotIndependent,
+    #[msg("A rejection names the sha256 of its reason; a withdrawal or an expiry names none")]
+    InvalidCloseReason,
+    #[msg("The curator cannot sponsor a proposal: it would approve its own")]
+    SponsorIsCurator,
+    #[msg("A proposal's resolver and compliance key must be neither its sponsor nor the curator")]
+    ProposalRoleNotIndependent,
+    #[msg("A proposal's resolve window (resolve_deadline - final_end) is shorter than MIN_RESOLVE_WINDOW")]
+    ResolveWindowTooShort,
+    #[msg("A proposal's bond is over MAX_PROPOSAL_BOND")]
+    ProposalBondTooHigh,
+    #[msg("The config is retired: no escrow opens, is funded or is proposed under it again")]
+    Retired,
+    #[msg("Only a retired config's escrows and the config itself are closed")]
+    NotRetired,
+    #[msg("A challenge still holds its bond in the escrow: close every challenge first")]
+    ChallengesOutstanding,
+    #[msg("A commit still holds its bond in the escrow: close every commit first")]
+    CommitsOutstanding,
+    #[msg("The config still counts value in open escrows or pending proposals")]
+    ValueOutstanding,
+    #[msg("The config still counts an escrow not closed")]
+    EscrowsOutstanding,
 }

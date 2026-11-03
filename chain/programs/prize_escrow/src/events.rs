@@ -332,6 +332,9 @@ pub enum ConfigChange {
     Disallowed,
     /// set_min_regraders wrote the panel floor (min_regraders).
     MinRegradersSet,
+    /// set_proposal_policy made `key` the curator (Pubkey::default(): proposals off) and set the
+    /// pending cap (the event's curator and pending_cap).
+    ProposalPolicySet,
 }
 
 /// Every Config change but the stop and the revocations (StopChanged, RevocationChanged): what
@@ -369,6 +372,13 @@ pub struct ConfigChanged {
     /// The panel floor open_escrow holds escrows to (0 on a Config written before the field: it
     /// refuses no panel, as 1 does).
     pub min_regraders: u8,
+    /// The proposal policy (set_proposal_policy): the curator (Pubkey::default(): proposals off)
+    /// and the pending cap, and what proposals awaiting review hold (Config.pending_value), as
+    /// open_value is what open escrows hold. Appended after min_regraders, so a ConfigChanged from
+    /// before proposals ends where they start.
+    pub curator: Pubkey,
+    pub pending_value: u64,
+    pub pending_cap: u64,
 }
 
 /// set_stop or extend_stop: the breaker level changed or its lapse moved.
@@ -428,4 +438,132 @@ pub struct RoleRotated {
     pub role: EscrowRole,
     pub old: Pubkey,
     pub new: Pubkey,
+}
+
+/// Why close_proposal returned a proposal's deposit to its sponsor.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProposalCloseKind {
+    /// The sponsor took its proposal back (no reason), by its review_deadline.
+    Withdrawn,
+    /// The curator rejected it, naming the sha256 of its reason document.
+    Rejected,
+    /// Its review_deadline passed undecided, and someone returned it naming no reason: anyone,
+    /// the sponsor and the curator (revoked or not) included.
+    Expired,
+}
+
+/// submit_proposal: the sponsor's deposit is in the proposal vault, its terms and schedule fixed,
+/// awaiting the curator's review until review_deadline.
+#[event]
+pub struct ProposalSubmitted {
+    pub proposal: Pubkey,
+    /// The escrow PDA approve_proposal opens: ["escrow", sponsor, competition_id].
+    pub escrow: Pubkey,
+    pub competition_id: [u8; 16],
+    pub sponsor: Pubkey,
+    /// The curator who co-signed the submit.
+    pub curator: Pubkey,
+    pub mint: Pubkey,
+    pub decimals: u8,
+    pub total: u64,
+    pub rules_sha256: [u8; 32],
+    pub resolver: Pubkey,
+    pub compliance: Pubkey,
+    pub arbiter: Pubkey,
+    pub refund_to: Pubkey,
+    pub regraders: Vec<Pubkey>,
+    pub k: u8,
+    pub bond_lamports: u64,
+    pub entries_deadline: i64,
+    pub final_end: i64,
+    pub resolve_deadline: i64,
+    pub challenge_window: i64,
+    pub attest_window: i64,
+    pub hold_window: i64,
+    pub claim_window: i64,
+    pub hard_deadline: i64,
+    /// When the competition opens: review_deadline <= opens_at < entries_deadline.
+    pub opens_at: i64,
+    /// The last second approve_proposal may land; after it anyone may return the deposit.
+    pub review_deadline: i64,
+    pub submitted_at: i64,
+    /// Config.pending_value after it (this deposit included).
+    pub pending_value: u64,
+}
+
+/// approve_proposal: the curator approved a proposal as submitted. Its escrow is open (an
+/// EscrowOpened event follows), the deposit moved into the escrow vault, the proposal and its
+/// vault closed (their rent to the sponsor).
+#[event]
+pub struct ProposalApproved {
+    pub proposal: Pubkey,
+    pub escrow: Pubkey,
+    pub competition_id: [u8; 16],
+    pub sponsor: Pubkey,
+    pub curator: Pubkey,
+    /// terms.total: moved into the escrow vault, and from Config.pending_value to open_value.
+    pub amount: u64,
+    /// What the proposal vault held beyond it (tokens anyone sent there), swept into the escrow
+    /// vault too, so the vault could close.
+    pub swept: u64,
+    /// Config.pending_value and open_value after it.
+    pub pending_value: u64,
+    pub open_value: u64,
+}
+
+/// close_proposal: the proposal vault was swept to the sponsor's associated token account, and
+/// the vault and the proposal closed (their rent to the sponsor).
+#[event]
+pub struct ProposalClosed {
+    pub proposal: Pubkey,
+    pub sponsor: Pubkey,
+    /// The tokens returned: the whole vault.
+    pub amount: u64,
+    pub kind: ProposalCloseKind,
+    /// The sha256 of the rejection document (Rejected); all zero otherwise.
+    pub reason_sha256: [u8; 32],
+    /// The signer: the sponsor (Withdrawn), the curator (Rejected), anyone past review_deadline
+    /// (Expired).
+    pub by: Pubkey,
+}
+
+/// retire: the admin retired the Config, for good. Intake refuses from here on (Retired); every
+/// payout, settle, refund and close stays open, and close_escrow and close_config may follow.
+#[event]
+pub struct ConfigRetired {
+    pub config: Pubkey,
+    /// The admin.
+    pub by: Pubkey,
+    /// Config.open_value, pending_value and live_escrows when it retired: what is left to wind down.
+    pub open_value: u64,
+    pub pending_value: u64,
+    pub live_escrows: u32,
+}
+
+/// close_escrow: the admin closed a retired Config's Closed escrow, its vault already closed
+/// (refund, or the last claim's sweep) and no bond left in it; every lamport it held went to its
+/// refund_to.
+#[event]
+pub struct EscrowClosed {
+    pub escrow: Pubkey,
+    pub competition_id: [u8; 16],
+    pub sponsor: Pubkey,
+    /// Who got the lamports: the escrow's refund_to.
+    pub refund_to: Pubkey,
+    /// The lamports the escrow account held: its rent and anything donated to it.
+    pub lamports: u64,
+    /// Config.live_escrows after it.
+    pub live_escrows: u32,
+}
+
+/// close_config: the admin, as the program's upgrade authority, closed the retired Config with
+/// nothing left under it; its rent went to the recipient. initialize_config may create a fresh one.
+#[event]
+pub struct ConfigClosed {
+    pub config: Pubkey,
+    /// The admin and upgrade authority.
+    pub by: Pubkey,
+    /// Who got the Config's lamports.
+    pub recipient: Pubkey,
+    pub lamports: u64,
 }

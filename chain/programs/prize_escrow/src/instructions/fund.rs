@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked};
 
 use crate::{
-    config::Config,
+    config::{AllowList, Config},
     constants::CONFIG_SEED,
     error::EscrowError,
     events::EscrowFunded,
@@ -49,18 +49,27 @@ pub struct Fund<'info> {
 
 /// Adds to the vault only: Escrow.total stays the opened amount until post_result, whose total
 /// may be at most the vault balance, fixes it. Refused while intake is stopped (IntakeStopped) or
-/// the sponsor is revoked (KeyRevoked); the escrow's deposits stay within the per-escrow cap C_e
-/// and open_value within the global cap C_g (EscrowCapExceeded, GlobalCapExceeded); a frozen
-/// sponsor or vault token account is refused by name (SponsorAccountFrozen, VaultFrozen).
+/// the sponsor is revoked (KeyRevoked), and for a sponsor not on the Config's sponsor allowlist
+/// today (SponsorNotAllowed): a sponsor whose escrow a proposal opened deposited once, for the
+/// terms the curator approved, and changes nothing after it (owner decision 7, the #852 audit's
+/// P3-3), and a sponsor taken off the allowlist since its open adds nothing either. The escrow's
+/// deposits stay within the per-escrow cap C_e and open_value within the global cap C_g
+/// (EscrowCapExceeded, GlobalCapExceeded); a frozen sponsor or vault token account is refused by
+/// name (SponsorAccountFrozen, VaultFrozen).
 pub fn handle_fund(ctx: Context<Fund>, amount: u64) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let status = ctx.accounts.escrow.status;
     require!(status != EscrowStatus::Closed, EscrowError::EscrowClosed);
     require!(status == EscrowStatus::Open, EscrowError::InvalidStatus);
     require!(amount > 0, EscrowError::InvalidAmount);
+    let sponsor = ctx.accounts.sponsor.key();
     let config = &mut ctx.accounts.config;
     config.require_intake(now)?;
-    config.require_not_revoked(&ctx.accounts.sponsor.key())?;
+    config.require_not_revoked(&sponsor)?;
+    require!(
+        config.is_listed(AllowList::Sponsor, &sponsor),
+        EscrowError::SponsorNotAllowed
+    );
     let deposited = config.deposit(ctx.accounts.escrow.deposited, amount)?;
     require!(
         !ctx.accounts.sponsor_token_account.is_frozen(),

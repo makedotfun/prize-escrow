@@ -37,12 +37,14 @@ use {
     prize_escrow::{
         accounts as accts, bond_floor, commit_hash, instruction as ixs, result_commitment,
         ArbiterChoice, AttestSide, Attestation, ChallengeRecord, ClaimReceipt, CommitRecord,
-        Config, Escrow, EscrowError, EscrowStatus, EscrowTerms, ResultSide, ARBITER_SLACK,
-        ATTESTATION_SEED, BOND_FLOOR_RENTS, CHALLENGE_SEED, CLAIM_SEED, COMMIT_SEED, CONFIG_SEED,
-        DEFAULT_MIN_REGRADERS, ESCROW_SEED, EVENT_AUTHORITY_AND_BUMP, HOLD_GEO, HOLD_NONE,
-        HOLD_REVIEW, HOLD_SANCTIONS, HOLD_TAX_FORM_REQUIRED, MAX_PROOF_LEN, MAX_REGRADERS,
-        MAX_REVEAL_GRACE, MAX_WINDOW, MIN_ATTEST_WINDOW, MIN_CHALLENGE_WINDOW, MIN_CLAIM_WINDOW,
-        MIN_HOLD_WINDOW, MIN_REVEAL_GRACE, RESULT_COMMITMENT_DOMAIN, STOP_DURATION,
+        Config, Escrow, EscrowError, EscrowStatus, EscrowTerms, Proposal, ResultSide,
+        ARBITER_SLACK, ATTESTATION_SEED, BOND_FLOOR_RENTS, CHALLENGE_SEED, CLAIM_SEED, COMMIT_SEED,
+        CONFIG_SEED, DEFAULT_MIN_REGRADERS, ESCROW_SEED, EVENT_AUTHORITY_AND_BUMP, HOLD_GEO,
+        HOLD_NONE, HOLD_REVIEW, HOLD_SANCTIONS, HOLD_TAX_FORM_REQUIRED, MAX_PROOF_LEN,
+        MAX_PROPOSAL_BOND, MAX_REGRADERS, MAX_REVEAL_GRACE, MAX_REVIEW_WINDOW, MAX_WINDOW,
+        MIN_ATTEST_WINDOW, MIN_CHALLENGE_WINDOW, MIN_CLAIM_WINDOW, MIN_HOLD_WINDOW,
+        MIN_RESOLVE_WINDOW, MIN_REVEAL_GRACE, PROPOSAL_SEED, RESULT_COMMITMENT_DOMAIN,
+        STOP_DURATION,
     },
     serde_json::Value,
     solana_account::Account,
@@ -91,13 +93,62 @@ fn account_sizes_are_pinned() {
     assert_eq!(CommitRecord::SPACE, 129);
     // Config: bump, stop and max_house_regraders + 4 keys (admin, pending_admin, guardian,
     // arbiter) + 16 u64/i64 + the four lists at their longest (4 mints, 32 sponsors, 16 registry
-    // entries of 33 bytes, 16 revoked keys, each with its 4-byte length) + min_regraders, carved
-    // from the 64 reserved bytes (63 left), so the account keeps its size.
+    // entries of 33 bytes, 16 revoked keys, each with its 4-byte length) + what were 64 reserved
+    // bytes: min_regraders (1), the curator, pending_value and pending_cap (48), retired (1) and
+    // live_escrows (4), and 10 still reserved. The size, and every field's offset before them,
+    // are what they were: a Config written before the carve-outs reads min_regraders 0, no
+    // curator (proposals off), nothing pending, not retired and no escrow counted.
     assert_eq!(
         Config::INIT_SPACE,
-        3 + 4 * 32 + 16 * 8 + (4 + 4 * 32) + (4 + 32 * 32) + (4 + 16 * 33) + (4 + 16 * 32) + 1 + 63
+        3 + 4 * 32
+            + 16 * 8
+            + (4 + 4 * 32)
+            + (4 + 32 * 32)
+            + (4 + 16 * 33)
+            + (4 + 16 * 32)
+            + (1 + 32 + 8 + 8 + 1 + 4 + 10)
     );
     assert_eq!(Config::SPACE, 2539);
+    // EscrowTerms at its longest (MAX_REGRADERS regraders): the total, the rules hash, 4 keys
+    // (resolver, compliance, arbiter, refund_to), the regraders with their length, k, the bond
+    // and 8 deadlines and windows.
+    assert_eq!(
+        EscrowTerms::INIT_SPACE,
+        8 + 32 + 4 * 32 + (4 + 5 * 32) + 1 + 8 + 8 * 8
+    );
+    // Proposal: bump and decimals + competition_id 16 + 2 keys (sponsor, mint) + the terms whole
+    // + opens_at, review_deadline, submitted_at and deposited + 32 reserved bytes.
+    assert_eq!(
+        Proposal::INIT_SPACE,
+        2 + 16 + 2 * 32 + EscrowTerms::INIT_SPACE + 4 * 8 + 32
+    );
+    assert_eq!(Proposal::SPACE, 559);
+    let terms = sample_terms(&Ids::fixed(), 1_800_000_000);
+    let mut data = Vec::new();
+    Proposal {
+        bump: 255,
+        decimals: DECIMALS,
+        competition_id: CID,
+        sponsor: Pubkey::new_unique(),
+        mint: Pubkey::new_unique(),
+        terms: EscrowTerms {
+            regraders: (0..5).map(|_| Pubkey::new_unique()).collect(),
+            ..terms
+        },
+        opens_at: 1,
+        review_deadline: 1,
+        submitted_at: 1,
+        deposited: TOTAL,
+        reserved: [0; 32],
+    }
+    .try_serialize(&mut data)
+    .unwrap();
+    assert_eq!(
+        data.len(),
+        Proposal::SPACE,
+        "a full panel fills the account"
+    );
+    assert_eq!(&data[..8], Proposal::DISCRIMINATOR);
     assert_eq!(ClaimReceipt::SPACE, 74);
     assert_eq!(Attestation::SPACE, 74);
     // ChallengeRecord: 2 keys (escrow, challenger) + 3 hashes (the alternative's result, root and
@@ -155,6 +206,10 @@ fn constants_are_the_release_values() {
     assert_eq!(CLAIM_SEED, b"claim");
     assert_eq!(ATTESTATION_SEED, b"attestation");
     assert_eq!(CHALLENGE_SEED, b"challenge");
+    assert_eq!(PROPOSAL_SEED, b"proposal");
+    assert_eq!(MAX_REVIEW_WINDOW, 7 * 24 * 60 * 60);
+    assert_eq!(MIN_RESOLVE_WINDOW, 14 * 24 * 60 * 60);
+    assert_eq!(MAX_PROPOSAL_BOND, 1_000_000_000);
     assert_eq!(
         [
             HOLD_NONE,
@@ -538,11 +593,26 @@ fn instructions() -> Vec<(&'static str, &'static [u8], bool)> {
         ("escalate", ixs::Escalate::DISCRIMINATOR, false),
         ("set_revoked", ixs::SetRevoked::DISCRIMINATOR, true),
         ("rotate_role", ixs::RotateRole::DISCRIMINATOR, true),
+        (
+            "set_proposal_policy",
+            ixs::SetProposalPolicy::DISCRIMINATOR,
+            true,
+        ),
+        ("submit_proposal", ixs::SubmitProposal::DISCRIMINATOR, true),
+        (
+            "approve_proposal",
+            ixs::ApproveProposal::DISCRIMINATOR,
+            false,
+        ),
+        ("close_proposal", ixs::CloseProposal::DISCRIMINATOR, true),
+        ("retire", ixs::Retire::DISCRIMINATOR, false),
+        ("close_escrow", ixs::CloseEscrow::DISCRIMINATOR, false),
+        ("close_config", ixs::CloseConfig::DISCRIMINATOR, false),
     ]
 }
 
 /// The error codes in wire order; append only.
-const ERRORS: [(EscrowError, &str); 97] = [
+const ERRORS: [(EscrowError, &str); 116] = [
     (EscrowError::UnauthorizedResolver, "UnauthorizedResolver"),
     (EscrowError::UnauthorizedArbiter, "UnauthorizedArbiter"),
     (EscrowError::NotARegrader, "NotARegrader"),
@@ -655,6 +725,28 @@ const ERRORS: [(EscrowError, &str); 97] = [
         "UnchallengedResultBinds",
     ),
     (EscrowError::PanelTooSmall, "PanelTooSmall"),
+    (EscrowError::ProposalsDisabled, "ProposalsDisabled"),
+    (EscrowError::UnauthorizedCurator, "UnauthorizedCurator"),
+    (EscrowError::PendingCapExceeded, "PendingCapExceeded"),
+    (EscrowError::ReviewWindowInvalid, "ReviewWindowInvalid"),
+    (EscrowError::ReviewWindowClosed, "ReviewWindowClosed"),
+    (EscrowError::SponsorRevoked, "SponsorRevoked"),
+    (EscrowError::EscrowExists, "EscrowExists"),
+    (EscrowError::CuratorNotIndependent, "CuratorNotIndependent"),
+    (EscrowError::InvalidCloseReason, "InvalidCloseReason"),
+    (EscrowError::SponsorIsCurator, "SponsorIsCurator"),
+    (
+        EscrowError::ProposalRoleNotIndependent,
+        "ProposalRoleNotIndependent",
+    ),
+    (EscrowError::ResolveWindowTooShort, "ResolveWindowTooShort"),
+    (EscrowError::ProposalBondTooHigh, "ProposalBondTooHigh"),
+    (EscrowError::Retired, "Retired"),
+    (EscrowError::NotRetired, "NotRetired"),
+    (EscrowError::ChallengesOutstanding, "ChallengesOutstanding"),
+    (EscrowError::CommitsOutstanding, "CommitsOutstanding"),
+    (EscrowError::ValueOutstanding, "ValueOutstanding"),
+    (EscrowError::EscrowsOutstanding, "EscrowsOutstanding"),
 ];
 
 fn bytes(v: &Value) -> Vec<u8> {
@@ -889,10 +981,43 @@ fn committed_idl_matches_the_program() {
             "associated_token_program",
             "system_program",
             "config",
+            "destination",
             "event_authority",
             "program"
         ]
     );
+    // The way back (refund, close_proposal) keeps the associated token account the client derives
+    // ([owner, token program, mint] under the associated token program) and takes an optional,
+    // writable destination of the owner's instead (the #852 audit's P2-2).
+    for (name, owner, ata) in [
+        ("refund", "refund_to", "refund_to_token_account"),
+        ("close_proposal", "sponsor", "sponsor_token_account"),
+    ] {
+        let accounts = &named(&idl["instructions"], name)["accounts"];
+        let pda = &named(accounts, ata)["pda"];
+        let seed = |i: usize| (&pda["seeds"][i]["kind"], &pda["seeds"][i]["path"]);
+        assert_eq!(
+            [seed(0), seed(1), seed(2)],
+            [
+                (&Value::from("account"), &Value::from(owner)),
+                (&Value::from("account"), &Value::from("token_program")),
+                (&Value::from("account"), &Value::from("mint")),
+            ],
+            "{name}'s {ata}"
+        );
+        assert_eq!(
+            bytes(&pda["program"]["value"]),
+            anchor_spl::associated_token::ID.to_bytes(),
+            "{name}'s {ata}"
+        );
+        assert_eq!(named(accounts, ata)["writable"], true);
+        let destination = named(accounts, "destination");
+        assert_eq!(
+            (&destination["optional"], &destination["writable"]),
+            (&Value::from(true), &Value::from(true)),
+            "{name}'s destination"
+        );
+    }
     assert_eq!(
         account_names("close_challenge"),
         [
@@ -925,6 +1050,167 @@ fn committed_idl_matches_the_program() {
         [&Value::from("escrow"), &Value::from("regrader")]
     );
     assert_eq!(arg_names("set_min_regraders"), ["min_regraders"]);
+    // The proposals: the sponsor and the curator both sign the submit; the approval takes no
+    // argument, so it cannot change a term; the return goes to an account the sponsor owns, never
+    // an argument.
+    assert_eq!(arg_names("set_proposal_policy"), ["curator", "pending_cap"]);
+    assert_eq!(
+        arg_names("submit_proposal"),
+        ["competition_id", "terms", "opens_at", "review_deadline"]
+    );
+    assert!(arg_names("approve_proposal").is_empty());
+    assert_eq!(arg_names("close_proposal"), ["reason_sha256"]);
+    assert_eq!(
+        account_names("submit_proposal"),
+        [
+            "sponsor",
+            "curator",
+            "proposal",
+            "mint",
+            "sponsor_token_account",
+            "proposal_vault",
+            "escrow",
+            "config",
+            "token_program",
+            "associated_token_program",
+            "system_program",
+            "event_authority",
+            "program"
+        ]
+    );
+    for signer in ["sponsor", "curator"] {
+        assert_eq!(
+            named(
+                &named(&idl["instructions"], "submit_proposal")["accounts"],
+                signer
+            )["signer"],
+            true,
+            "{signer} signs the submit"
+        );
+    }
+    assert_eq!(
+        account_names("approve_proposal"),
+        [
+            "curator",
+            "proposal",
+            "proposal_vault",
+            "escrow",
+            "escrow_vault",
+            "mint",
+            "sponsor",
+            "config",
+            "token_program",
+            "associated_token_program",
+            "system_program",
+            "event_authority",
+            "program"
+        ]
+    );
+    assert_eq!(
+        account_names("close_proposal"),
+        [
+            "authority",
+            "proposal",
+            "proposal_vault",
+            "mint",
+            "sponsor",
+            "sponsor_token_account",
+            "config",
+            "token_program",
+            "associated_token_program",
+            "system_program",
+            "destination",
+            "event_authority",
+            "program"
+        ]
+    );
+    // The wind-down: retire and close_escrow are the admin's alone; close_config is the admin's
+    // as the program's upgrade authority (its ProgramData read, as initialize_config's is); none
+    // takes an argument, and close_escrow's lamports go to the escrow's refund_to (has_one).
+    // close_receipt is anyone's: the claimant only receives the rent.
+    for name in ["retire", "close_escrow", "close_config", "close_receipt"] {
+        assert!(arg_names(name).is_empty(), "{name} takes no argument");
+    }
+    assert_eq!(
+        account_names("retire"),
+        ["admin", "config", "event_authority", "program"]
+    );
+    assert_eq!(
+        account_names("close_escrow"),
+        [
+            "admin",
+            "config",
+            "escrow",
+            "refund_to",
+            "event_authority",
+            "program"
+        ]
+    );
+    assert_eq!(
+        account_names("close_config"),
+        [
+            "admin",
+            "config",
+            "program_data",
+            "recipient",
+            "event_authority",
+            "program"
+        ]
+    );
+    let signs = |ix: &str, account: &str| -> bool {
+        named(&named(&idl["instructions"], ix)["accounts"], account)["signer"] == true
+    };
+    for ix in ["retire", "close_escrow", "close_config"] {
+        assert!(signs(ix, "admin"), "the admin signs {ix}");
+    }
+    assert!(!signs("close_escrow", "refund_to"));
+    assert!(!signs("close_config", "recipient"));
+    assert_eq!(
+        account_names("close_receipt"),
+        ["claimant", "escrow", "receipt", "event_authority", "program"]
+    );
+    assert!(
+        !signs("close_receipt", "claimant"),
+        "close_receipt is permissionless"
+    );
+    let close_config_data = &named(
+        &named(&idl["instructions"], "close_config")["accounts"],
+        "program_data",
+    )["pda"];
+    assert_eq!(
+        bytes(&close_config_data["seeds"][0]["value"]),
+        prize_escrow::ID.as_ref()
+    );
+    // The proposal PDA as the client derives it: ["proposal", sponsor, competition_id]; the
+    // approval opens the escrow at ["escrow", proposal.sponsor, proposal.competition_id].
+    let proposal_seeds = &named(
+        &named(&idl["instructions"], "submit_proposal")["accounts"],
+        "proposal",
+    )["pda"]["seeds"];
+    assert_eq!(bytes(&proposal_seeds[0]["value"]), PROPOSAL_SEED);
+    assert_eq!(
+        (&proposal_seeds[1]["kind"], &proposal_seeds[1]["path"]),
+        (&Value::from("account"), &Value::from("sponsor"))
+    );
+    assert_eq!(
+        (&proposal_seeds[2]["kind"], &proposal_seeds[2]["path"]),
+        (&Value::from("arg"), &Value::from("competition_id"))
+    );
+    let approved_escrow_seeds = &named(
+        &named(&idl["instructions"], "approve_proposal")["accounts"],
+        "escrow",
+    )["pda"]["seeds"];
+    assert_eq!(bytes(&approved_escrow_seeds[0]["value"]), ESCROW_SEED);
+    assert_eq!(
+        [
+            &approved_escrow_seeds[1]["path"],
+            &approved_escrow_seeds[2]["path"]
+        ],
+        [
+            &Value::from("proposal.sponsor"),
+            &Value::from("proposal.competition_id")
+        ]
+    );
     let variants = |name: &str| -> Vec<String> {
         named(&idl["types"], name)["type"]["variants"]
             .as_array()
@@ -948,7 +1234,7 @@ fn committed_idl_matches_the_program() {
         ["Resolver", "Compliance", "Regrader"]
     );
     assert_eq!(variants("ConfigRole"), ["Guardian", "Arbiter"]);
-    // Append only: the variant is the event's u8 tag.
+    // Append only: the variant is the event's u8 tag (ProposalPolicySet follows MinRegradersSet).
     assert_eq!(
         variants("ConfigChange"),
         [
@@ -961,8 +1247,13 @@ fn committed_idl_matches_the_program() {
             "FloorsSet",
             "Allowed",
             "Disallowed",
-            "MinRegradersSet"
+            "MinRegradersSet",
+            "ProposalPolicySet"
         ]
+    );
+    assert_eq!(
+        variants("ProposalCloseKind"),
+        ["Withdrawn", "Rejected", "Expired"]
     );
     let fields = |name: &str| -> Vec<String> {
         named(&idl["types"], name)["type"]["fields"]
@@ -972,16 +1263,58 @@ fn committed_idl_matches_the_program() {
             .map(|f| f["name"].as_str().unwrap().to_owned())
             .collect()
     };
-    // Config's min_regraders sits where reserved began, so the fields before it keep their bytes.
+    // Config's min_regraders, then the proposal policy, sit where reserved began, so the fields
+    // before them keep their bytes; ConfigChanged appends them in the same order, so an event
+    // from before either ends where its fields start.
     let config_fields = fields("Config");
     assert_eq!(
-        config_fields[config_fields.len() - 3..],
-        ["revoked", "min_regraders", "reserved"]
+        config_fields[config_fields.len() - 8..],
+        [
+            "revoked",
+            "min_regraders",
+            "curator",
+            "pending_value",
+            "pending_cap",
+            "retired",
+            "live_escrows",
+            "reserved"
+        ]
+    );
+    assert_eq!(
+        fields("ConfigRetired"),
+        [
+            "config",
+            "by",
+            "open_value",
+            "pending_value",
+            "live_escrows"
+        ]
+    );
+    assert_eq!(
+        fields("EscrowClosed"),
+        [
+            "escrow",
+            "competition_id",
+            "sponsor",
+            "refund_to",
+            "lamports",
+            "live_escrows"
+        ]
+    );
+    assert_eq!(
+        fields("ConfigClosed"),
+        ["config", "by", "recipient", "lamports"]
     );
     let config_changed = fields("ConfigChanged");
     assert_eq!(
-        config_changed.last().map(String::as_str),
-        Some("min_regraders")
+        config_changed[config_changed.len() - 5..],
+        [
+            "reveal_grace",
+            "min_regraders",
+            "curator",
+            "pending_value",
+            "pending_cap"
+        ]
     );
     assert_eq!(
         fields("AttestationClosed"),
@@ -1077,8 +1410,9 @@ fn committed_idl_matches_the_program() {
     );
     assert_eq!(escrow_seeds.as_array().unwrap().len(), 3);
 
-    let accounts: [(&str, &[u8]); 6] = [
+    let accounts: [(&str, &[u8]); 7] = [
         ("Escrow", Escrow::DISCRIMINATOR),
+        ("Proposal", Proposal::DISCRIMINATOR),
         ("ClaimReceipt", ClaimReceipt::DISCRIMINATOR),
         ("Attestation", Attestation::DISCRIMINATOR),
         ("ChallengeRecord", ChallengeRecord::DISCRIMINATOR),
@@ -1094,7 +1428,19 @@ fn committed_idl_matches_the_program() {
         );
     }
 
-    let events: [(&str, &[u8]); 24] = [
+    let events: [(&str, &[u8]); 30] = [
+        (
+            "ProposalSubmitted",
+            prize_escrow::ProposalSubmitted::DISCRIMINATOR,
+        ),
+        (
+            "ProposalApproved",
+            prize_escrow::ProposalApproved::DISCRIMINATOR,
+        ),
+        (
+            "ProposalClosed",
+            prize_escrow::ProposalClosed::DISCRIMINATOR,
+        ),
         (
             "ChallengeCommitted",
             prize_escrow::ChallengeCommitted::DISCRIMINATOR,
@@ -1140,6 +1486,9 @@ fn committed_idl_matches_the_program() {
             "AttestationClosed",
             prize_escrow::AttestationClosed::DISCRIMINATOR,
         ),
+        ("ConfigRetired", prize_escrow::ConfigRetired::DISCRIMINATOR),
+        ("EscrowClosed", prize_escrow::EscrowClosed::DISCRIMINATOR),
+        ("ConfigClosed", prize_escrow::ConfigClosed::DISCRIMINATOR),
     ];
     assert_eq!(idl["events"].as_array().unwrap().len(), events.len());
     for (name, disc) in events {
@@ -1180,6 +1529,9 @@ fn committed_idl_matches_the_program() {
         ("STOP_DURATION", STOP_DURATION.to_string()),
         ("MIN_REVEAL_GRACE", MIN_REVEAL_GRACE.to_string()),
         ("MAX_REVEAL_GRACE", MAX_REVEAL_GRACE.to_string()),
+        ("MAX_REVIEW_WINDOW", MAX_REVIEW_WINDOW.to_string()),
+        ("MIN_RESOLVE_WINDOW", MIN_RESOLVE_WINDOW.to_string()),
+        ("MAX_PROPOSAL_BOND", MAX_PROPOSAL_BOND.to_string()),
     ] {
         assert_eq!(named(&idl["constants"], name)["value"], value, "{name}");
     }
@@ -2329,6 +2681,7 @@ fn refund_and_close_receipt_accounts() {
                 associated_token_program: associated_token::ID,
                 system_program: system_program::ID,
                 config: config_pda(),
+                destination: None,
                 event_authority: EVENT_AUTHORITY,
                 program: prize_escrow::ID,
             },
@@ -2359,20 +2712,27 @@ fn refund_and_close_receipt_accounts() {
             ixs::CloseReceipt {},
         )
     };
-    let stranger = w.stranger.insecure_clone();
-    let ix = close(stranger.pubkey(), &w);
-    let refused = w.send(ix, &[&stranger]);
+    // Nobody signs as the claimant (any fee payer sends it): the receipt's has_one and seeds pin
+    // where its rent goes.
+    let ix = close(w.stranger.pubkey(), &w);
+    let refused = w.send(ix, &[]);
     assert!(
         matches!(
             custom_code(&refused),
             Some(c) if c == u32::from(AnchorErrorCode::ConstraintHasOne)
                 || c == u32::from(AnchorErrorCode::ConstraintSeeds)
         ),
-        "close_receipt by a stranger: {}",
+        "close_receipt paying a stranger: {}",
         logs(&refused)
     );
     let ix = close(claimant.pubkey(), &w);
-    assert_accounts_accepted(w.send(ix, &[&claimant]), "close_receipt");
+    assert!(
+        ix.accounts
+            .iter()
+            .all(|meta| meta.pubkey != claimant.pubkey() || !meta.is_signer),
+        "close_receipt needs no claimant signature"
+    );
+    assert_accounts_accepted(w.send(ix, &[]), "close_receipt");
 }
 
 #[test]

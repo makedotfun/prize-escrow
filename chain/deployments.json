@@ -1,5 +1,5 @@
 {
-  "$comment": "Public keys only, per cluster, written by scripts/chain/bootstrap.ts from what the chain holds after it runs, and by scripts/chain/deploy.ts on a deploy or an upgrade (programSha256: the verified sha256 of the bytes deployed; upgrade: a prepared buffer and its verified sha256, until the upgrade authority applies it). governance names who holds the roles: single-key (owner decision #541: the owner's key is the upgrade authority, the Config's admin and its arbiter, and a separate owner key is its guardian, none of them on the server; the upgrade authority moves only by SetAuthorityChecked, which the new key co-signs, so while a prepared handover waits upgradeAuthority is still the deploy key and roles.upgradeAuthority names the owner's), or squads (a test cluster: squads.vault is every escrow's arbiter, and upgradeAuthority is the deploy key). Localnet addresses all derive from key files, so they survive a ledger reset.",
+  "$comment": "Public keys only, per cluster, written by scripts/chain/bootstrap.ts from what the chain holds after it runs, and by scripts/chain/deploy.ts on a deploy or an upgrade (programSha256: the verified sha256 of the bytes deployed; upgrade: a prepared buffer and its verified sha256, until the upgrade authority applies it). governance names who holds the roles: single-key (owner decision #541: the owner's key is the upgrade authority, the Config's admin and its arbiter, and a separate owner key is its guardian, none of them on the server; the upgrade authority moves only by SetAuthorityChecked, which the new key co-signs, so while a prepared handover waits upgradeAuthority is still the deploy key and roles.upgradeAuthority names the owner's), or squads (a test cluster: squads.vault is every escrow's arbiter, and upgradeAuthority is the deploy key). closed: the slot at which deploy.ts close read the program closed (its ProgramData and metadata gone, their rent returned; the program never runs again). Localnet addresses all derive from key files, so they survive a ledger reset.",
   "localnet": {
     "programId": "sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd",
     "build": "test-windows",
@@ -41,7 +41,7 @@
   "devnet": {
     "programId": "sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd",
     "build": "test-windows",
-    "programSha256": "2525c2c9fc2e76afdec4b21c61a6e914bbdfa28c9ac8cbb8fe721cd8788ec68a",
+    "programSha256": "9309b62a9f2cc1028ef919d7677e3fb9763f48e79493c68fecab30d1c4137dd3",
     "upgradeAuthority": "9LDrDGKnTTQsGz1aBB37VuqaiYY3zs4YsQbcoPF1uAq6",
     "governance": "squads",
     "config": "B6Zuh2vXHEVNBwr3bsndJdD9Z6e54TQVhjJj5GRUpfTC",
@@ -82,6 +82,40 @@
         "HLAmSMfiQGXuEXvysGNgxe92VaGJHyr3AUhpJ7aJ8ba",
         "3rANARNNj1SZjWcUCERaGgGJexv2BVKeampPLBMRyGvS"
       ]
-    }
+    },
+    "curator": "Fq6KCufW3Q9BV6Srk4EuibhLGzm5rRAEYYJ2oBdhdAgb"
+  },
+  "mainnet": {
+    "programId": "sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd",
+    "build": "release",
+    "programSha256": "45434e9247c006c37bcf998b9ddbeb8b83c64f3b0e9863feebe1ed52e42c657d",
+    "upgradeAuthority": "2oyHAoA7m7owTCxTdrUrZe2zkGU7R7a1jwhRnhpJPiGw",
+    "governance": "single-key",
+    "config": "B6Zuh2vXHEVNBwr3bsndJdD9Z6e54TQVhjJj5GRUpfTC",
+    "roles": {
+      "upgradeAuthority": "2oyHAoA7m7owTCxTdrUrZe2zkGU7R7a1jwhRnhpJPiGw",
+      "admin": "2oyHAoA7m7owTCxTdrUrZe2zkGU7R7a1jwhRnhpJPiGw",
+      "arbiter": "2oyHAoA7m7owTCxTdrUrZe2zkGU7R7a1jwhRnhpJPiGw",
+      "guardian": "54PJ239ZHqb9BmuogYVLYTZHT4zSoLMxJzfMiMWNQSum"
+    },
+    "mint": {
+      "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "decimals": 6,
+      "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "mintAuthority": "BJE5MMbqXjVwjAF7oxwPYXnTXDyspzZyt4vwenNw5ruG",
+      "freezeAuthority": "7dGbd2QZcCKcTndnHcTL8q7SMVXAkp688NTQYwrRCrar"
+    },
+    "keys": {
+      "deployer": "5i94wZk27jTaA22NHjuVueYxTh64aqSuRCtTdjZ9jEWH",
+      "sponsor": "2sHEE5H6nd5289MXEWiqoQcbWjSLuEBzEowPZ8ESiFbp",
+      "resolver": "9giFaeXd1NumoNYsvpkhrqWHYFihkkJmdHMSabXKFrs8",
+      "compliance": "7giK2PJ8VGgo4sxLJhYsR7YA4xDT3a3CbsJA6Nt9Jvwc",
+      "regraders": [
+        "4bPGfRjE5EcJV4rBVikK9aRtNQq93ZDNycDGZSp7Yo5f",
+        "4WPAGT6wnJgxJzjcwnbFPM2vpVxaTExg9TzvWuhfQ6bn",
+        "5pbKPw7uCN4ispJYKhw1voScjMkBDrij4G45WqQZftsp"
+      ]
+    },
+    "curator": "GWXoaTFyuCayt7qa6mMcTv7j4r9hDwvA2LMJVWbwKQVk"
   }
 }

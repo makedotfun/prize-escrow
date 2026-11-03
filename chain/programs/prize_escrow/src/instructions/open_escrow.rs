@@ -61,10 +61,11 @@ pub struct OpenEscrow<'info> {
     pub config: Account<'info, Config>,
 }
 
-/// After EscrowTerms::validate, Config holds the open to its policy (Config::check_open_policy,
-/// which also refuses the escrow's own address as the resolver or the compliance key:
-/// RoleIsEscrow), refuses it while intake is stopped (IntakeStopped), and holds the deposit to the
-/// per-escrow cap C_e and open_value to the global cap C_g (EscrowCapExceeded, GlobalCapExceeded).
+/// After EscrowTerms::validate, Config holds the open to its policy (Config::check_terms_policy
+/// with the sponsor allowlist, which also refuses the escrow's own address as the resolver or the
+/// compliance key: RoleIsEscrow), refuses it while intake is stopped (IntakeStopped), and holds
+/// the deposit to the per-escrow cap C_e and open_value, with what pending proposals hold, to the
+/// global cap C_g (EscrowCapExceeded, GlobalCapExceeded).
 /// A frozen sponsor or vault token account is refused by name (SponsorAccountFrozen,
 /// VaultFrozen). The escrow keeps Config's global stopped seconds (its clock counts only stops
 /// after it opened) and reveal grace (always shorter than its attest window: MAX_REVEAL_GRACE <
@@ -81,10 +82,9 @@ pub fn handle_open_escrow(
     let escrow_key = ctx.accounts.escrow.key();
     let config = &mut ctx.accounts.config;
     config.require_intake(now)?;
-    config.check_open_policy(&sponsor, &mint, &escrow_key, &terms)?;
+    config.check_terms_policy(&sponsor, &mint, &escrow_key, &terms, true)?;
     let deposited = config.deposit(0, terms.total)?;
-    let stop_base = config.global_stopped(now);
-    let reveal_grace = config.reveal_grace;
+    config.escrow_opened()?;
     require!(
         !ctx.accounts.sponsor_token_account.is_frozen(),
         EscrowError::SponsorAccountFrozen
@@ -109,24 +109,68 @@ pub fn handle_open_escrow(
     ctx.accounts.vault.reload()?;
     check_deposit(before, ctx.accounts.vault.amount, terms.total)?;
 
+    let opened = init_escrow(
+        &mut ctx.accounts.escrow,
+        NewEscrow {
+            bump: ctx.bumps.escrow,
+            decimals,
+            competition_id,
+            sponsor,
+            mint,
+            deposited,
+        },
+        terms,
+        &ctx.accounts.config,
+        now,
+    );
+    emit_cpi!(opened);
+    Ok(())
+}
+
+/// What an escrow opens with beyond its terms: its PDA's bump, the mint's decimals, the
+/// competition id and the sponsor (its seeds), the mint, and what Config::deposit counted for it.
+pub(crate) struct NewEscrow {
+    pub bump: u8,
+    pub decimals: u8,
+    pub competition_id: [u8; 16],
+    pub sponsor: Pubkey,
+    pub mint: Pubkey,
+    pub deposited: u64,
+}
+
+/// Writes a freshly created escrow account, Open, from `terms` (already held to
+/// EscrowTerms::validate and Config::check_terms_policy, the deposit already in its vault and
+/// counted by Config::deposit or Config::approve_pending), and returns the EscrowOpened event its
+/// instruction emits. The one place an escrow is born: open_escrow and approve_proposal both
+/// call it, so an escrow a proposal opens is field for field the one open_escrow would have
+/// opened with the same terms at the same moment. The escrow keeps Config's global stopped
+/// seconds at `now` (its clock counts only stops after it opened) and Config's reveal grace.
+pub(crate) fn init_escrow(
+    escrow: &mut Account<Escrow>,
+    new: NewEscrow,
+    terms: EscrowTerms,
+    config: &Config,
+    now: i64,
+) -> EscrowOpened {
+    let escrow_key = escrow.key();
     // validate() bounded the set to 1..=MAX_REGRADERS keys, so n fits a u8 and the slots.
     let n = terms.regraders.len();
     let mut regraders = [Pubkey::default(); MAX_REGRADERS as usize];
     regraders[..n].copy_from_slice(&terms.regraders);
 
-    ctx.accounts.escrow.set_inner(Escrow {
-        bump: ctx.bumps.escrow,
-        decimals,
+    escrow.set_inner(Escrow {
+        bump: new.bump,
+        decimals: new.decimals,
         status: EscrowStatus::Open,
         k: terms.k,
         n: n as u8,
-        competition_id,
-        sponsor,
+        competition_id: new.competition_id,
+        sponsor: new.sponsor,
         resolver: terms.resolver,
         compliance: terms.compliance,
         arbiter: terms.arbiter,
         refund_to: terms.refund_to,
-        mint,
+        mint: new.mint,
         challenger: Pubkey::default(),
         rules_sha256: terms.rules_sha256,
         entries_root: [0; 32],
@@ -159,27 +203,27 @@ pub fn handle_open_escrow(
         votes_result: 0,
         votes_alt: 0,
         regraders,
-        deposited,
-        stop_base,
+        deposited: new.deposited,
+        stop_base: config.global_stopped(now),
         freeze_since: 0,
         freeze_until: 0,
         frozen_secs: 0,
-        reveal_grace,
+        reveal_grace: config.reveal_grace,
         commit_bond: 0,
         pending_commits: 0,
         reserved: [0; 64],
     });
 
-    emit_cpi!(EscrowOpened {
+    EscrowOpened {
         escrow: escrow_key,
-        competition_id,
-        sponsor,
+        competition_id: new.competition_id,
+        sponsor: new.sponsor,
         resolver: terms.resolver,
         compliance: terms.compliance,
         arbiter: terms.arbiter,
         refund_to: terms.refund_to,
-        mint,
-        decimals,
+        mint: new.mint,
+        decimals: new.decimals,
         total: terms.total,
         rules_sha256: terms.rules_sha256,
         regraders: terms.regraders,
@@ -193,8 +237,7 @@ pub fn handle_open_escrow(
         hold_window: terms.hold_window,
         claim_window: terms.claim_window,
         hard_deadline: terms.hard_deadline,
-    });
-    Ok(())
+    }
 }
 
 /// The underfunding check open_escrow and fund make after their transfer: the vault, measured

@@ -8,10 +8,18 @@
 //   node chain/programs/prize_escrow/tests/kani/run.mjs [filter ...] [--jobs N] [--solver S]
 //                                                       [--timeout MINUTES]
 //   node chain/programs/prize_escrow/tests/kani/run.mjs --relock
+//   node chain/programs/prize_escrow/tests/kani/run.mjs --mutants
 //
-// --relock rewrites Cargo.lock here from chain/Cargo.lock, pruned to this crate's graph by cargo
-// 1.89 in the image (it keeps the versions chain/Cargo.lock pins and drops the rest), for when the
-// program's dependencies change: the read-only mount refuses any other lockfile write.
+// --mutants runs mutants.sh here in one container: each mutant a copy of the program with one
+// seeded bug, which the harness meant to catch it must fail. Its table goes to
+// <worktree>/.tmp/kani/mutants.out, each mutant's Kani log to mutant.<name>.log there; exit 0 when
+// every mutant was caught (VERIFICATION:- FAILED).
+//
+// --relock rewrites Cargo.lock here from chain/Cargo.lock, pruned to this crate's graph by the cargo
+// of chain/rust-toolchain.toml's channel in the image (it keeps the versions chain/Cargo.lock pins
+// and drops the rest), for when the program's dependencies change: the read-only mount refuses any
+// other lockfile write. The image installs that channel (Dockerfile's CHAIN_TOOLCHAIN, read from
+// the toolchain file at every run), so a toolchain bump rebuilds one layer.
 //
 // A filter selects the harnesses whose module::name contains it (all of them by default). Logs go
 // to <worktree>/.tmp/kani/<module>.<harness>.log, the image build's to image-build.log, and the
@@ -41,9 +49,11 @@ let jobs = 1
 let solver = null
 let timeoutMinutes = null
 let relock = false
+let mutants = false
 for (let i = 0; i < args.length; i++) {
   const arg = args[i]
   if (arg === '--relock') relock = true
+  else if (arg === '--mutants') mutants = true
   else if (arg === '--jobs') jobs = Number(args[++i])
   else if (arg === '--solver') solver = args[++i]
   else if (arg === '--timeout') timeoutMinutes = Number(args[++i])
@@ -128,13 +138,42 @@ if (selected.length === 0) throw new Error(`no harness matches ${filters.join(',
 
 const buildLog = join(logs, 'image-build.log')
 const buildFd = openSync(buildLog, 'w')
-const built = spawnSync('docker', ['build', '-t', IMAGE, '-f', join(here, 'Dockerfile'), here], {
-  stdio: ['ignore', buildFd, buildFd],
-})
+// The channel chain/rust-toolchain.toml pins: `cargo` under chain/ resolves to it in the container.
+const toolchain = readFileSync(join(chain, 'rust-toolchain.toml'), 'utf8').match(/^channel\s*=\s*"([^"]+)"/m)?.[1]
+if (!toolchain) throw new Error(`no channel in ${join(chain, 'rust-toolchain.toml')}`)
+const built = spawnSync(
+  'docker',
+  ['build', '-t', IMAGE, '--build-arg', `CHAIN_TOOLCHAIN=${toolchain}`, '-f', join(here, 'Dockerfile'), here],
+  { stdio: ['ignore', buildFd, buildFd] },
+)
 closeSync(buildFd)
 if (built.status !== 0) {
   console.error(`docker build failed (exit ${built.status}): ${buildLog}`)
   process.exit(1)
+}
+
+if (mutants) {
+  // The worktree's .tmp/kani/ is mutants.sh's /logs; its stdout is the table.
+  const out = join(logs, 'mutants.out')
+  const outFd = openSync(out, 'w')
+  const ran = spawnSync(
+    'docker',
+    [
+      'run', '--rm', '--name', `agent-fun-kani-${process.pid}-mutants`, '--memory', '6g',
+      '-v', `${chain}:/src/chain:ro`,
+      '-v', `${logs}:/logs`,
+      '-v', 'agent-fun-kani-registry:/usr/local/cargo/registry',
+      '-v', 'agent-fun-kani-target:/target',
+      '-e', 'CARGO_TARGET_DIR=/target',
+      IMAGE, 'sh', `${inContainer}/mutants.sh`,
+    ],
+    { stdio: ['ignore', outFd, 'inherit'] },
+  )
+  closeSync(outFd)
+  const lines = readFileSync(out, 'utf8').split('\n').filter((line) => line.startsWith('MUTANT '))
+  const missed = lines.filter((line) => !line.includes('VERIFICATION:- FAILED'))
+  console.log([...lines, '', `${lines.length - missed.length} of ${lines.length} mutants caught: ${out}`].join('\n'))
+  process.exit(ran.status === 0 && lines.length > 0 && missed.length === 0 ? 0 : 1)
 }
 
 if (relock) {
@@ -147,7 +186,7 @@ if (relock) {
       '-v', `${here}:${inContainer}`,
       '-v', 'agent-fun-kani-registry:/usr/local/cargo/registry',
       '-w', inContainer,
-      IMAGE, 'cargo', '+1.89.0', 'metadata', '--format-version', '1',
+      IMAGE, 'cargo', `+${toolchain}`, 'metadata', '--format-version', '1',
     ],
     { stdio: ['ignore', 'ignore', 'inherit'] },
   )

@@ -806,7 +806,8 @@ impl Cl {
         self.send(ix, &[who])
     }
 
-    /// `who` closes the receipt of `of` (its own, unless a test says otherwise).
+    /// The receipt of `of` closed with `who` named as the claimant its rent goes to (`of` itself,
+    /// unless a test says otherwise). Nobody signs for the claimant: the payer sends it.
     #[allow(clippy::result_large_err, reason = "LiteSVM's own result type")]
     fn close_receipt(&mut self, who: Who, of: Pubkey) -> TransactionResult {
         let ix = instruction(
@@ -819,7 +820,7 @@ impl Cl {
             },
             ixs::CloseReceipt {},
         );
-        self.send(ix, &[who])
+        self.send(ix, &[])
     }
 
     #[allow(clippy::result_large_err, reason = "LiteSVM's own result type")]
@@ -980,6 +981,7 @@ impl Cl {
                 associated_token_program: associated_token::ID,
                 system_program: system_program::ID,
                 config: config_pda(),
+                destination: None,
                 event_authority: EVENT_AUTHORITY,
                 program: prize_escrow::ID,
             },
@@ -1807,7 +1809,7 @@ fn receipts_close_once_the_escrow_is_refunded_and_return_the_rent_to_the_winner(
             Some(c) if c == u32::from(AnchorErrorCode::ConstraintHasOne)
                 || c == u32::from(AnchorErrorCode::ConstraintSeeds)
         ),
-        "a stranger closing the winner's receipt: {}",
+        "a close of the winner's receipt paying its rent to a stranger: {}",
         logs(&r)
     );
 

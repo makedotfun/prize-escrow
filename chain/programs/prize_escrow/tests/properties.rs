@@ -4,8 +4,11 @@
 //! src/instructions/open_escrow.rs, where it is pub(crate)), the stoppable escrow clock
 //! (config::escrow_now with Config's stop and Escrow's freeze, against a timeline simulated hour by
 //! hour), the claim flow bucket (Config::refill, take_flow, set_limits), the escalation that never
-//! shortens a lapse, EscrowTerms::validate and Config::check_open_policy (F6's open policy) against
-//! reference predicates written from their doc comments.
+//! shortens a lapse, EscrowTerms::validate and Config::check_terms_policy (F6's open policy, and a
+//! proposal's, which waives the sponsor allowlist alone) against reference predicates written from
+//! their doc comments, Config::check_proposal_terms (the bounds a proposal's terms are held to),
+//! and the caps' counters (Config::deposit, release, reserve_pending, approve_pending,
+//! release_pending): open_value + pending_value is always the open deposits.
 //!
 //! PROPTEST_CASES raises the case count (default 256 per property).
 
@@ -25,9 +28,10 @@ use {
         commit_hash,
         merkle::{compute_leaf_hash, hash_pair, verify_proof},
         result_commitment, ArbiterChoice, Config, ConfigInit, Escrow, EscrowError, EscrowStatus,
-        EscrowTerms, Floors, Limits, RegraderEntry, StopState, ARBITER_SLACK, MAX_REGRADERS,
-        MAX_REVEAL_GRACE, MAX_WINDOW, MIN_ATTEST_WINDOW, MIN_CHALLENGE_WINDOW, MIN_CLAIM_WINDOW,
-        MIN_HOLD_WINDOW, MIN_REVEAL_GRACE, RESULT_COMMITMENT_DOMAIN, STOP_DURATION,
+        EscrowTerms, Floors, Limits, RegraderEntry, StopState, ARBITER_SLACK, MAX_PROPOSAL_BOND,
+        MAX_REGRADERS, MAX_REVEAL_GRACE, MAX_WINDOW, MIN_ATTEST_WINDOW, MIN_CHALLENGE_WINDOW,
+        MIN_CLAIM_WINDOW, MIN_HOLD_WINDOW, MIN_RESOLVE_WINDOW, MIN_REVEAL_GRACE,
+        RESULT_COMMITMENT_DOMAIN, STOP_DURATION,
     },
     proptest::prelude::*,
     support::merkle_tree,
@@ -1060,14 +1064,16 @@ prop_compose! {
     }
 }
 
-/// Config::check_open_policy's rules, from its doc comment (validate's are the program's other
-/// half).
+/// Config::check_terms_policy's rules, from its doc comment (validate's are the program's other
+/// half): the sponsor allowlist only when `sponsor_allowlisted` (open_escrow), never for a
+/// proposal.
 fn allowed(
     config: &Config,
     sponsor: &Pubkey,
     mint: &Pubkey,
     escrow: &Pubkey,
     t: &EscrowTerms,
+    sponsor_allowlisted: bool,
 ) -> bool {
     let house = t
         .regraders
@@ -1079,7 +1085,7 @@ fn allowed(
         && t.hold_window >= config.min_hold_window
         && t.claim_window >= config.min_claim_window;
     config.mints.contains(mint)
-        && config.sponsors.contains(sponsor)
+        && (!sponsor_allowlisted || config.sponsors.contains(sponsor))
         && t.refund_to == *sponsor
         && t.arbiter == config.arbiter
         && t.compliance != Pubkey::default()
@@ -1100,18 +1106,80 @@ fn allowed(
 }
 
 proptest! {
-    /// check_open_policy accepts exactly the open policy (F6 as a property): the mint and the
+    /// check_terms_policy accepts exactly the open policy (F6 as a property): the mint and the
     /// sponsor allowed, refund_to the sponsor, the Config's arbiter, a compliance key, the minimum
     /// bond, every window at its floor, every regrader registered, the house within its allowance,
     /// the panel independent of the resolver and the compliance key, neither of those the escrow's
-    /// own address, and no key revoked.
+    /// own address, and no key revoked. A proposal's check (sponsor_allowlisted false) accepts
+    /// exactly the same rules but the sponsor allowlist, and waives nothing else: every other
+    /// refusal stays, by the same error.
     #[test]
     fn the_open_policy_accepts_exactly_its_rules((config, sponsor, mint, escrow, t) in policy_case()) {
+        let open = config.check_terms_policy(&sponsor, &mint, &escrow, &t, true);
         prop_assert_eq!(
-            config.check_open_policy(&sponsor, &mint, &escrow, &t).is_ok(),
-            allowed(&config, &sponsor, &mint, &escrow, &t),
+            open.is_ok(),
+            allowed(&config, &sponsor, &mint, &escrow, &t, true),
             "{:?}", t
         );
+        let proposal = config.check_terms_policy(&sponsor, &mint, &escrow, &t, false);
+        prop_assert_eq!(
+            proposal.is_ok(),
+            allowed(&config, &sponsor, &mint, &escrow, &t, false),
+            "{:?}", t
+        );
+        // A refusal other than the allowlist's is the proposal's too, by the same error; behind
+        // SponsorNotAllowed the proposal meets the rules after it (allowed(.., false) above).
+        let waived = u32::from(EscrowError::SponsorNotAllowed);
+        match (open.map_err(code), proposal.map_err(code)) {
+            (Err(e), Ok(())) => prop_assert_eq!(e, waived),
+            (Err(e), Err(p)) => prop_assert!(e == waived || e == p, "open {} but proposal {}", e, p),
+            (Ok(()), p) => prop_assert!(p.is_ok(), "a proposal refused what open_escrow takes"),
+        }
+    }
+}
+
+proptest! {
+    /// Config::check_proposal_terms accepts exactly its rules (the #852 audit's P2-1 and P3-1),
+    /// each refusal by its own error in the documented order: the sponsor not the curator
+    /// (SponsorIsCurator), neither the resolver nor the compliance key the sponsor or the curator
+    /// (ProposalRoleNotIndependent), resolve_deadline - final_end at least MIN_RESOLVE_WINDOW
+    /// (ResolveWindowTooShort), the bond at most MAX_PROPOSAL_BOND (ProposalBondTooHigh). No
+    /// curator named (Pubkey::default()) is no key's: it refuses nothing.
+    #[test]
+    fn the_proposal_bounds_accept_exactly_their_rules(
+        (t, _, _) in valid_terms(),
+        keys in (0u8..=3, 0u8..=3, 0u8..=3, 0u8..=4),
+        window in prop_oneof![Just(MIN_RESOLVE_WINDOW - 1), Just(MIN_RESOLVE_WINDOW), 1i64..=2 * MIN_RESOLVE_WINDOW],
+        bond in prop_oneof![Just(MAX_PROPOSAL_BOND), Just(MAX_PROPOSAL_BOND + 1), 1u64..=2 * MAX_PROPOSAL_BOND],
+    ) {
+        // Four keys of no Config role (50 to 53) for the sponsor, the resolver and the compliance
+        // key, and the curator one of them or none named.
+        let (sponsor, resolver, compliance) = (pk(50 + keys.0), pk(50 + keys.1), pk(50 + keys.2));
+        let curator = if keys.3 == 0 { Pubkey::default() } else { pk(49 + keys.3) };
+        let mut config = config_at(1_800_000_000, limits(1, 1));
+        config.set_proposal_policy(curator, 0).unwrap();
+        let mut t = t;
+        t.resolver = resolver;
+        t.compliance = compliance;
+        t.resolve_deadline = t.final_end + window;
+        t.bond_lamports = bond;
+        let named = |k: &Pubkey| curator != Pubkey::default() && *k == curator;
+        let want = if named(&sponsor) {
+            Some(EscrowError::SponsorIsCurator)
+        } else if [resolver, compliance].iter().any(|r| *r == sponsor || named(r)) {
+            Some(EscrowError::ProposalRoleNotIndependent)
+        } else if window < MIN_RESOLVE_WINDOW {
+            Some(EscrowError::ResolveWindowTooShort)
+        } else if bond > MAX_PROPOSAL_BOND {
+            Some(EscrowError::ProposalBondTooHigh)
+        } else {
+            None
+        };
+        match (config.check_proposal_terms(&sponsor, &t), want) {
+            (Ok(()), None) => {}
+            (Err(e), Some(want)) => prop_assert_eq!(code(e), u32::from(want)),
+            (got, want) => prop_assert!(false, "got {:?}, want {:?}", got.map_err(code), want),
+        }
     }
 }
 
@@ -1128,12 +1196,279 @@ fn the_generators_reach_both_sides() {
         terms_ok += usize::from(valid(&t, now, min_bond));
         let (config, sponsor, mint, escrow, t) =
             policy_case().new_tree(&mut runner).unwrap().current();
-        policy_ok += usize::from(allowed(&config, &sponsor, &mint, &escrow, &t));
+        policy_ok += usize::from(allowed(&config, &sponsor, &mint, &escrow, &t, true));
     }
-    for (what, ok) in [("validate", terms_ok), ("check_open_policy", policy_ok)] {
+    for (what, ok) in [("validate", terms_ok), ("check_terms_policy", policy_ok)] {
         assert!(
             (draws / 5..=draws * 4 / 5).contains(&ok),
             "{what}: {ok} of {draws} draws accepted"
         );
+    }
+}
+
+// ------------------------------------------------------------------------- the caps' counters
+
+/// One move on the caps' counters, as the instruction that makes it calls Config: open_escrow
+/// (Config::deposit of a new escrow), fund (deposit on top of an escrow's), refund (release),
+/// submit_proposal (reserve_pending), approve_proposal (approve_pending: the proposal becomes an
+/// escrow holding its deposit), close_proposal (release_pending), and the admin moving C_e, C_g or
+/// the pending cap. Indices pick among the escrows or proposals so far, modulo their count.
+#[derive(Clone, Copy, Debug)]
+enum CapOp {
+    Open(u64),
+    Fund(u8, u64),
+    Refund(u8),
+    Submit(u64),
+    Approve(u8),
+    Close(u8),
+    Caps(u64, u64, u64),
+}
+
+fn cap_op() -> impl Strategy<Value = CapOp> {
+    let amount = || prop_oneof![1u64..=400, Just(1u64), Just(u64::MAX)];
+    prop_oneof![
+        3 => amount().prop_map(CapOp::Open),
+        2 => (any::<u8>(), amount()).prop_map(|(i, a)| CapOp::Fund(i, a)),
+        2 => any::<u8>().prop_map(CapOp::Refund),
+        4 => amount().prop_map(CapOp::Submit),
+        3 => any::<u8>().prop_map(CapOp::Approve),
+        2 => any::<u8>().prop_map(CapOp::Close),
+        1 => (1u64..=600, 1u64..=1_500, 0u64..=1_000).prop_map(|(e, g, p)| CapOp::Caps(e, g, p)),
+    ]
+}
+
+/// The reference ledger: each escrow's deposit and whether it is still open (not refunded), and
+/// each proposal's deposit and whether it still awaits review.
+#[derive(Default)]
+struct Ledger {
+    escrows: Vec<(u64, bool)>,
+    proposals: Vec<(u64, bool)>,
+}
+
+impl Ledger {
+    fn open(&self) -> u128 {
+        self.escrows
+            .iter()
+            .filter(|e| e.1)
+            .map(|e| u128::from(e.0))
+            .sum()
+    }
+
+    fn pending(&self) -> u128 {
+        self.proposals
+            .iter()
+            .filter(|p| p.1)
+            .map(|p| u128::from(p.0))
+            .sum()
+    }
+}
+
+proptest! {
+    /// Config's counters are the open deposits, whatever the order of opens, funds, refunds,
+    /// submits, approvals, returns and cap changes: open_value is what every escrow not yet
+    /// refunded deposited (an approved proposal's included), pending_value what every proposal
+    /// awaiting review deposited, and the two together count against C_g. Every deposit is held to
+    /// the caps in force at its moment, by the documented error in the documented order (C_e,
+    /// then the pending cap, then C_g), and refused exactly when they would be exceeded; an
+    /// approval moves its deposit from pending to open whatever C_g says since (its room was
+    /// taken at the submit), and is refused exactly when the escrow it opens would be over today's
+    /// C_e (EscrowCapExceeded, the proposal still pending); a refund or a return never fails for
+    /// the counters' sake.
+    #[test]
+    fn open_value_and_pending_value_are_the_open_deposits(
+        caps in (1u64..=600, 1u64..=1_500, 0u64..=1_000),
+        ops in prop::collection::vec(cap_op(), 1..=60),
+    ) {
+        let mut config = config_at(1_800_000_000, Limits { escrow_cap: caps.0, global_cap: caps.1, ..limits(1, 1) });
+        config.set_proposal_policy(Pubkey::new_from_array([9; 32]), caps.2).unwrap();
+        let mut ledger = Ledger::default();
+        for op in ops {
+            let (c_e, c_g, c_p) = (
+                u128::from(config.escrow_cap),
+                u128::from(config.global_cap),
+                u128::from(config.pending_cap),
+            );
+            let held = ledger.open() + ledger.pending();
+            match op {
+                CapOp::Open(amount) => {
+                    let want = if u128::from(amount) > c_e {
+                        Some(EscrowError::EscrowCapExceeded)
+                    } else if held + u128::from(amount) > c_g {
+                        Some(EscrowError::GlobalCapExceeded)
+                    } else {
+                        None
+                    };
+                    match (config.deposit(0, amount), want) {
+                        (Ok(deposited), None) => {
+                            prop_assert_eq!(deposited, amount);
+                            ledger.escrows.push((amount, true));
+                        }
+                        (Err(e), Some(want)) => prop_assert_eq!(code(e), u32::from(want), "{:?}", op),
+                        (got, want) => prop_assert!(false, "{:?}: got {:?}, want {:?}", op, got.map_err(code), want),
+                    }
+                }
+                CapOp::Fund(i, amount) => {
+                    let open: Vec<usize> = (0..ledger.escrows.len()).filter(|j| ledger.escrows[*j].1).collect();
+                    if open.is_empty() {
+                        continue;
+                    }
+                    let j = open[usize::from(i) % open.len()];
+                    let deposited = ledger.escrows[j].0;
+                    let want = if u128::from(deposited) + u128::from(amount) > c_e {
+                        Some(EscrowError::EscrowCapExceeded)
+                    } else if held + u128::from(amount) > c_g {
+                        Some(EscrowError::GlobalCapExceeded)
+                    } else {
+                        None
+                    };
+                    match (config.deposit(deposited, amount), want) {
+                        (Ok(total), None) => {
+                            prop_assert_eq!(total, deposited + amount);
+                            ledger.escrows[j].0 = total;
+                        }
+                        (Err(e), Some(want)) => prop_assert_eq!(code(e), u32::from(want), "{:?}", op),
+                        (got, want) => prop_assert!(false, "{:?}: got {:?}, want {:?}", op, got.map_err(code), want),
+                    }
+                }
+                CapOp::Refund(i) => {
+                    let open: Vec<usize> = (0..ledger.escrows.len()).filter(|j| ledger.escrows[*j].1).collect();
+                    if open.is_empty() {
+                        continue;
+                    }
+                    let j = open[usize::from(i) % open.len()];
+                    config.release(ledger.escrows[j].0);
+                    ledger.escrows[j].1 = false;
+                }
+                CapOp::Submit(amount) => {
+                    let pending = ledger.pending();
+                    let want = if u128::from(amount) > c_e {
+                        Some(EscrowError::EscrowCapExceeded)
+                    } else if pending + u128::from(amount) > c_p {
+                        Some(EscrowError::PendingCapExceeded)
+                    } else if held + u128::from(amount) > c_g {
+                        Some(EscrowError::GlobalCapExceeded)
+                    } else {
+                        None
+                    };
+                    match (config.reserve_pending(amount), want) {
+                        (Ok(()), None) => ledger.proposals.push((amount, true)),
+                        (Err(e), Some(want)) => prop_assert_eq!(code(e), u32::from(want), "{:?}", op),
+                        (got, want) => prop_assert!(false, "{:?}: got {:?}, want {:?}", op, got.map_err(code), want),
+                    }
+                }
+                CapOp::Approve(i) | CapOp::Close(i) => {
+                    let pending: Vec<usize> = (0..ledger.proposals.len()).filter(|j| ledger.proposals[*j].1).collect();
+                    if pending.is_empty() {
+                        continue;
+                    }
+                    let j = pending[usize::from(i) % pending.len()];
+                    let amount = ledger.proposals[j].0;
+                    if matches!(op, CapOp::Approve(_)) {
+                        // The escrow an approval opens is held to today's C_e (a C_e lowered since
+                        // the submit refuses it, the proposal still pending); C_g is not read again.
+                        match (config.approve_pending(amount), u128::from(amount) > c_e) {
+                            (Ok(()), false) => {
+                                ledger.proposals[j].1 = false;
+                                ledger.escrows.push((amount, true));
+                            }
+                            (Err(e), true) => prop_assert_eq!(code(e), u32::from(EscrowError::EscrowCapExceeded), "{:?}", op),
+                            (got, over) => prop_assert!(false, "{:?}: got {:?}, over C_e {}", op, got.map_err(code), over),
+                        }
+                    } else {
+                        ledger.proposals[j].1 = false;
+                        config.release_pending(amount);
+                    }
+                }
+                CapOp::Caps(escrow_cap, global_cap, pending_cap) => {
+                    config.set_limits(&Limits { escrow_cap, global_cap, ..limits(1, 1) }, 1_800_000_000).unwrap();
+                    config.set_proposal_policy(config.curator, pending_cap).unwrap();
+                }
+            }
+            prop_assert_eq!(u128::from(config.open_value), ledger.open(), "open_value after {:?}", op);
+            prop_assert_eq!(u128::from(config.pending_value), ledger.pending(), "pending_value after {:?}", op);
+            if matches!(op, CapOp::Open(_) | CapOp::Fund(..) | CapOp::Submit(_)) && u128::from(config.open_value) + u128::from(config.pending_value) > held {
+                prop_assert!(
+                    u128::from(config.open_value) + u128::from(config.pending_value) <= u128::from(config.global_cap),
+                    "a deposit took the counters past C_g: {:?}", op
+                );
+            }
+        }
+    }
+}
+
+/// The counters' generator reaches every outcome: deposits taken and refused by each cap, and
+/// approvals and returns of proposals that got in.
+#[test]
+fn the_cap_generator_reaches_every_outcome() {
+    use proptest::{strategy::ValueTree, test_runner::TestRunner};
+    let mut runner = TestRunner::deterministic();
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..300 {
+        let caps = (1u64..=600, 1u64..=1_500, 0u64..=1_000)
+            .new_tree(&mut runner)
+            .unwrap()
+            .current();
+        let ops = prop::collection::vec(cap_op(), 1..=60)
+            .new_tree(&mut runner)
+            .unwrap()
+            .current();
+        let mut config = config_at(
+            1_800_000_000,
+            Limits {
+                escrow_cap: caps.0,
+                global_cap: caps.1,
+                ..limits(1, 1)
+            },
+        );
+        config
+            .set_proposal_policy(Pubkey::new_from_array([9; 32]), caps.2)
+            .unwrap();
+        let mut pending = Vec::new();
+        for op in ops {
+            match op {
+                CapOp::Open(a) => {
+                    seen.insert(match config.deposit(0, a) {
+                        Ok(_) => "open ok".to_string(),
+                        Err(e) => format!("open {}", code(e)),
+                    });
+                }
+                CapOp::Submit(a) => {
+                    seen.insert(match config.reserve_pending(a) {
+                        Ok(()) => {
+                            pending.push(a);
+                            "submit ok".to_string()
+                        }
+                        Err(e) => format!("submit {}", code(e)),
+                    });
+                }
+                CapOp::Approve(_) if !pending.is_empty() => {
+                    config.approve_pending(pending.pop().unwrap()).unwrap();
+                    seen.insert("approve".to_string());
+                }
+                CapOp::Close(_) if !pending.is_empty() => {
+                    config.release_pending(pending.pop().unwrap());
+                    seen.insert("close".to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+    let (e, g, p) = (
+        u32::from(EscrowError::EscrowCapExceeded),
+        u32::from(EscrowError::GlobalCapExceeded),
+        u32::from(EscrowError::PendingCapExceeded),
+    );
+    for want in [
+        "open ok".to_string(),
+        format!("open {e}"),
+        format!("open {g}"),
+        "submit ok".to_string(),
+        format!("submit {e}"),
+        format!("submit {p}"),
+        format!("submit {g}"),
+        "approve".to_string(),
+        "close".to_string(),
+    ] {
+        assert!(seen.contains(&want), "{want} never happened: {seen:?}");
     }
 }

@@ -5,6 +5,6 @@
   "contacts": ["email:security@make.fun"],
   "policy": "Report vulnerabilities privately to security@make.fun, never in a public issue or post.",
   "preferred_languages": ["en"],
-  "source_code": "https://github.com/ezolabs/prize-escrow",
+  "source_code": "https://github.com/makedotfun/prize-escrow",
   "version": "0.1.0"
 }

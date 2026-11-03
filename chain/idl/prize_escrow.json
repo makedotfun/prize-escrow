@@ -56,6 +56,275 @@
       "args": []
     },
     {
+      "name": "approve_proposal",
+      "docs": [
+        "The curator, by review_deadline, opens the proposal's escrow with its stored terms (no",
+        "arguments: nothing can change) through open_escrow's own init, moves the deposit into the",
+        "escrow vault (any extra tokens swept after it), and closes the proposal and its vault, their",
+        "rent to the sponsor. The terms are held to today's Config again, the escrow to today's",
+        "per-escrow cap."
+      ],
+      "discriminator": [
+        136,
+        108,
+        102,
+        85,
+        98,
+        114,
+        7,
+        147
+      ],
+      "accounts": [
+        {
+          "name": "curator",
+          "docs": [
+            "The Config's curator (checked in the handler); pays the escrow's and its vault's rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "proposal",
+          "docs": [
+            "Closed into the escrow, its rent to the sponsor."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  112,
+                  111,
+                  115,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "proposal.sponsor",
+                "account": "Proposal"
+              },
+              {
+                "kind": "account",
+                "path": "proposal.competition_id",
+                "account": "Proposal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "proposal_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "proposal"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The escrow the proposal opens: PDA [\"escrow\", sponsor, competition_id], as open_escrow's."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "proposal.sponsor",
+                "account": "Proposal"
+              },
+              {
+                "kind": "account",
+                "path": "proposal.competition_id",
+                "account": "Proposal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_vault",
+          "docs": [
+            "The escrow's associated token account. init_if_needed, so a vault someone created ahead",
+            "of time cannot block the approval."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "proposal"
+          ]
+        },
+        {
+          "name": "sponsor",
+          "writable": true,
+          "relations": [
+            "proposal"
+          ]
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The curator, the open policy, the caps (the deposit moves from pending_value to",
+            "open_value) and the stop."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "arbiter_resolve",
       "docs": [
         "The Config's arbiter chooses which result of a Frozen escrow applies, the posted one or a",
@@ -1135,9 +1404,480 @@
       "args": []
     },
     {
+      "name": "close_config",
+      "docs": [
+        "Admin and upgrade authority, once the Config is retired with no value or escrow left under",
+        "it: closes the Config. initialize_config may then create a fresh one."
+      ],
+      "discriminator": [
+        145,
+        9,
+        72,
+        157,
+        95,
+        125,
+        61,
+        85
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "The Config's admin, and the program's upgrade authority (program_data)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program_data",
+          "docs": [
+            "This program's ProgramData account, [\"<program id>\"] under the upgradeable loader: the",
+            "admin must be its upgrade authority, as initialize_config's signer must."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  12,
+                  225,
+                  89,
+                  43,
+                  176,
+                  180,
+                  163,
+                  124,
+                  7,
+                  88,
+                  199,
+                  191,
+                  145,
+                  5,
+                  84,
+                  23,
+                  104,
+                  255,
+                  147,
+                  248,
+                  120,
+                  148,
+                  106,
+                  103,
+                  13,
+                  193,
+                  31,
+                  27,
+                  125,
+                  180,
+                  10,
+                  84
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                2,
+                168,
+                246,
+                145,
+                78,
+                136,
+                161,
+                176,
+                226,
+                16,
+                21,
+                62,
+                247,
+                99,
+                174,
+                43,
+                0,
+                194,
+                185,
+                61,
+                22,
+                193,
+                36,
+                210,
+                192,
+                83,
+                122,
+                16,
+                4,
+                128,
+                0,
+                0
+              ]
+            }
+          }
+        },
+        {
+          "name": "recipient",
+          "docs": [
+            "Gets the Config's lamports."
+          ],
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_escrow",
+      "docs": [
+        "Admin, once the Config is retired: closes a Closed escrow with no bond left in it (its",
+        "receipts, challenges, commits and attestations closed first), every lamport to refund_to."
+      ],
+      "discriminator": [
+        139,
+        171,
+        94,
+        146,
+        191,
+        91,
+        144,
+        50
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Retired; its live_escrows count goes down by one."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "refund_to",
+          "docs": [
+            "Gets every lamport the escrow holds."
+          ],
+          "writable": true,
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_proposal",
+      "docs": [
+        "The one way back: the whole proposal vault returns to a token account the sponsor owns",
+        "(its associated one, or the optional `destination`) and the proposal closes, signed by the",
+        "sponsor (Withdrawn, no reason), the curator (Rejected, the reason's sha256) or, after",
+        "review_deadline with no reason, anyone (Expired). Refused while a PayoutStop holds, and for",
+        "a revoked sponsor (SponsorRevoked: held)."
+      ],
+      "discriminator": [
+        213,
+        178,
+        139,
+        19,
+        50,
+        191,
+        82,
+        245
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The sponsor (Withdrawn), the curator (Rejected) or, after review_deadline, anyone",
+            "(Expired); pays the rent of the sponsor's associated token account when it is created here."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "proposal",
+          "docs": [
+            "Closed, its rent to the sponsor."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  112,
+                  111,
+                  115,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "proposal.sponsor",
+                "account": "Proposal"
+              },
+              {
+                "kind": "account",
+                "path": "proposal.competition_id",
+                "account": "Proposal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "proposal_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "proposal"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "proposal"
+          ]
+        },
+        {
+          "name": "sponsor",
+          "writable": true,
+          "relations": [
+            "proposal"
+          ]
+        },
+        {
+          "name": "sponsor_token_account",
+          "docs": [
+            "The sponsor's associated token account of the mint, its address held by the seeds (the",
+            "client derives it): where the deposit returns unless `destination` names another account",
+            "of the sponsor's, created when absent and refused unless the sponsor still owns it",
+            "(sweep_destination). The deposit returns only to an account the sponsor owns, so no caller",
+            "can send it anywhere else."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "sponsor"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The curator, the stop, and the pending counter (the deposit comes off pending_value)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "destination",
+          "docs": [
+            "Optional: any token account of the mint the sponsor owns, where the deposit returns",
+            "instead of sponsor_token_account, so a sponsor that reassigned its associated account's",
+            "owner cannot pin its proposal (and pending_value) by it."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "reason_sha256",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "close_receipt",
       "docs": [
-        "The claimant closes its receipt after the escrow is Closed and takes the rent back."
+        "Permissionless: closes a claimant's receipt once its escrow is Closed, its rent back to the",
+        "claimant."
       ],
       "discriminator": [
         126,
@@ -1156,7 +1896,6 @@
             "The receipt's claimant; gets the rent back."
           ],
           "writable": true,
-          "signer": true,
           "relations": [
             "receipt"
           ]
@@ -1439,7 +2178,8 @@
     {
       "name": "fund",
       "docs": [
-        "The sponsor adds `amount` to the vault while the escrow is Open, within the caps."
+        "The sponsor adds `amount` to the vault while the escrow is Open, within the caps, as long as",
+        "it is on the sponsor allowlist (a sponsor whose escrow a proposal opened adds nothing)."
       ],
       "discriminator": [
         218,
@@ -2235,7 +2975,8 @@
     {
       "name": "refund",
       "docs": [
-        "Permissionless: sweeps the vault to refund_to and closes it, leaving the escrow Closed and",
+        "Permissionless: sweeps the vault to a token account refund_to owns (its associated one, or",
+        "the optional `destination`) and closes it, leaving the escrow Closed and",
         "the resolver's bond (if still held) returned; challengers' bonds still held wait for",
         "close_challenge. Allowed when Claimable past claim_deadline (whatever hard_deadline says),",
         "Open past resolve_deadline, or any other status past hard_deadline, except a Disputed",
@@ -2255,7 +2996,7 @@
         {
           "name": "payer",
           "docs": [
-            "Pays the fees and, if needed, refund_to's token account rent."
+            "Pays the fees and, if needed, the rent of refund_to's associated token account."
           ],
           "writable": true,
           "signer": true
@@ -2336,6 +3077,12 @@
         },
         {
           "name": "refund_to_token_account",
+          "docs": [
+            "refund_to's associated token account of the mint, its address held by the seeds (the client",
+            "derives it): where the vault goes unless `destination` names another account of",
+            "refund_to's, created when absent and refused unless refund_to still owns it",
+            "(sweep_destination)."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -2429,6 +3176,16 @@
               }
             ]
           }
+        },
+        {
+          "name": "destination",
+          "docs": [
+            "Optional: any token account of the mint refund_to owns, where the vault goes instead of",
+            "refund_to_token_account, so a refund_to that reassigned its associated account's owner",
+            "cannot pin the escrow (and open_value) by it."
+          ],
+          "writable": true,
+          "optional": true
         },
         {
           "name": "event_authority"
@@ -2631,6 +3388,55 @@
           }
         }
       ]
+    },
+    {
+      "name": "retire",
+      "docs": [
+        "Admin: retires the Config for good. Intake (open_escrow, fund, submit_proposal,",
+        "approve_proposal) refuses from here on; every payout and close stays open."
+      ],
+      "discriminator": [
+        44,
+        138,
+        153,
+        31,
+        222,
+        53,
+        21,
+        16
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
     },
     {
       "name": "rotate_role",
@@ -3064,6 +3870,64 @@
       ]
     },
     {
+      "name": "set_proposal_policy",
+      "docs": [
+        "The admin names the curator (Pubkey::default(): proposals off) and the pending cap. The",
+        "curator is never revoked, nor the admin, the guardian or the arbiter."
+      ],
+      "discriminator": [
+        208,
+        29,
+        63,
+        52,
+        217,
+        103,
+        193,
+        191
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "curator",
+          "type": "pubkey"
+        },
+        {
+          "name": "pending_cap",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "set_revoked",
       "docs": [
         "The guardian revokes a key (refused everywhere after); the admin unrevokes it."
@@ -3316,6 +4180,248 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "submit_proposal",
+      "docs": [
+        "A sponsor, co-signed by the Config's curator, deposits `terms.total` into the proposal",
+        "vault at the PDA [\"proposal\", sponsor, competition_id] for review until `review_deadline`",
+        "(now < review_deadline <= opens_at < entries_deadline, at most MAX_REVIEW_WINDOW away),",
+        "held to EscrowTerms::validate and the open policy (the sponsor allowlist waived), the",
+        "proposal's own bounds (the sponsor not the curator, neither the resolver nor the compliance",
+        "key the sponsor or the curator, a resolve window of at least MIN_RESOLVE_WINDOW, a bond of",
+        "at most MAX_PROPOSAL_BOND), the per-escrow cap, the pending cap and the global cap. No",
+        "escrow may exist at the id."
+      ],
+      "discriminator": [
+        224,
+        38,
+        210,
+        52,
+        167,
+        150,
+        221,
+        150
+      ],
+      "accounts": [
+        {
+          "name": "sponsor",
+          "docs": [
+            "Funds the proposal vault from `sponsor_token_account` and pays the proposal's and the",
+            "vault's rent (every exit returns both to it)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "curator",
+          "docs": [
+            "The Config's curator, co-signing once the house screened the sponsor (checked in the",
+            "handler: ProposalsDisabled, UnauthorizedCurator, KeyRevoked)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "proposal",
+          "docs": [
+            "PDA [\"proposal\", sponsor, competition_id]: one sponsor cannot submit (squat) another's."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  112,
+                  111,
+                  115,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "sponsor"
+              },
+              {
+                "kind": "arg",
+                "path": "competition_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The prize mint, owned by the classic Token program (no Token-2022, so no transfer hook)."
+          ]
+        },
+        {
+          "name": "sponsor_token_account",
+          "writable": true
+        },
+        {
+          "name": "proposal_vault",
+          "docs": [
+            "The proposal's associated token account. init_if_needed, so a vault someone created ahead",
+            "of time cannot block the submit."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "proposal"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "no data (EscrowExists, read in the handler), so the competition id is not one already",
+            "opened, or refunded and kept as a Closed replay marker."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "sponsor"
+              },
+              {
+                "kind": "arg",
+                "path": "competition_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The curator, the open policy, the caps (pending_value grows by the deposit) and the stop."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "competition_id",
+          "type": {
+            "array": [
+              "u8",
+              16
+            ]
+          }
+        },
+        {
+          "name": "terms",
+          "type": {
+            "defined": {
+              "name": "EscrowTerms"
+            }
+          }
+        },
+        {
+          "name": "opens_at",
+          "type": "i64"
+        },
+        {
+          "name": "review_deadline",
+          "type": "i64"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -3395,6 +4501,19 @@
         22,
         218,
         155
+      ]
+    },
+    {
+      "name": "Proposal",
+      "discriminator": [
+        26,
+        94,
+        189,
+        187,
+        116,
+        136,
+        53,
+        33
       ]
     }
   ],
@@ -3530,6 +4649,32 @@
       ]
     },
     {
+      "name": "ConfigClosed",
+      "discriminator": [
+        4,
+        138,
+        208,
+        218,
+        204,
+        236,
+        118,
+        199
+      ]
+    },
+    {
+      "name": "ConfigRetired",
+      "discriminator": [
+        165,
+        183,
+        87,
+        118,
+        213,
+        156,
+        106,
+        193
+      ]
+    },
+    {
       "name": "EntriesCommitted",
       "discriminator": [
         196,
@@ -3553,6 +4698,19 @@
         28,
         97,
         244
+      ]
+    },
+    {
+      "name": "EscrowClosed",
+      "discriminator": [
+        109,
+        20,
+        57,
+        51,
+        217,
+        118,
+        3,
+        173
       ]
     },
     {
@@ -3618,6 +4776,45 @@
         86,
         197,
         90
+      ]
+    },
+    {
+      "name": "ProposalApproved",
+      "discriminator": [
+        70,
+        49,
+        155,
+        228,
+        157,
+        43,
+        88,
+        49
+      ]
+    },
+    {
+      "name": "ProposalClosed",
+      "discriminator": [
+        57,
+        90,
+        47,
+        164,
+        105,
+        55,
+        97,
+        27
+      ]
+    },
+    {
+      "name": "ProposalSubmitted",
+      "discriminator": [
+        36,
+        127,
+        215,
+        177,
+        143,
+        187,
+        90,
+        147
       ]
     },
     {
@@ -4197,6 +5394,101 @@
       "code": 6096,
       "name": "PanelTooSmall",
       "msg": "The escrow names fewer regraders than the config's min_regraders"
+    },
+    {
+      "code": 6097,
+      "name": "ProposalsDisabled",
+      "msg": "Proposals are off: the config names no curator"
+    },
+    {
+      "code": 6098,
+      "name": "UnauthorizedCurator",
+      "msg": "The signer is not the config's curator"
+    },
+    {
+      "code": 6099,
+      "name": "PendingCapExceeded",
+      "msg": "Proposals awaiting review would hold more than the config's pending cap"
+    },
+    {
+      "code": 6100,
+      "name": "ReviewWindowInvalid",
+      "msg": "The review deadline must be in the future, at most MAX_REVIEW_WINDOW after the submit, and no later than opens_at, which is before the entries deadline"
+    },
+    {
+      "code": 6101,
+      "name": "ReviewWindowClosed",
+      "msg": "The review deadline has passed: the proposal can only be returned"
+    },
+    {
+      "code": 6102,
+      "name": "SponsorRevoked",
+      "msg": "The sponsor is revoked: its proposal is held, neither approved nor returned, until the admin unrevokes it"
+    },
+    {
+      "code": 6103,
+      "name": "EscrowExists",
+      "msg": "An escrow already exists at this sponsor's competition id"
+    },
+    {
+      "code": 6104,
+      "name": "CuratorNotIndependent",
+      "msg": "The curator must be a key of its own: not the admin, the guardian or the arbiter"
+    },
+    {
+      "code": 6105,
+      "name": "InvalidCloseReason",
+      "msg": "A rejection names the sha256 of its reason; a withdrawal or an expiry names none"
+    },
+    {
+      "code": 6106,
+      "name": "SponsorIsCurator",
+      "msg": "The curator cannot sponsor a proposal: it would approve its own"
+    },
+    {
+      "code": 6107,
+      "name": "ProposalRoleNotIndependent",
+      "msg": "A proposal's resolver and compliance key must be neither its sponsor nor the curator"
+    },
+    {
+      "code": 6108,
+      "name": "ResolveWindowTooShort",
+      "msg": "A proposal's resolve window (resolve_deadline - final_end) is shorter than MIN_RESOLVE_WINDOW"
+    },
+    {
+      "code": 6109,
+      "name": "ProposalBondTooHigh",
+      "msg": "A proposal's bond is over MAX_PROPOSAL_BOND"
+    },
+    {
+      "code": 6110,
+      "name": "Retired",
+      "msg": "The config is retired: no escrow opens, is funded or is proposed under it again"
+    },
+    {
+      "code": 6111,
+      "name": "NotRetired",
+      "msg": "Only a retired config's escrows and the config itself are closed"
+    },
+    {
+      "code": 6112,
+      "name": "ChallengesOutstanding",
+      "msg": "A challenge still holds its bond in the escrow: close every challenge first"
+    },
+    {
+      "code": 6113,
+      "name": "CommitsOutstanding",
+      "msg": "A commit still holds its bond in the escrow: close every commit first"
+    },
+    {
+      "code": 6114,
+      "name": "ValueOutstanding",
+      "msg": "The config still counts value in open escrows or pending proposals"
+    },
+    {
+      "code": 6115,
+      "name": "EscrowsOutstanding",
+      "msg": "The config still counts an escrow not closed"
     }
   ],
   "types": [
@@ -5248,14 +6540,63 @@
             "type": "u8"
           },
           {
+            "name": "curator",
+            "docs": [
+              "The key that co-signs a sponsor's submit_proposal (after the house screened the sponsor)",
+              "and approves the proposal as submitted or rejects it back to the sponsor, and nothing else:",
+              "it never sponsors a proposal, nor is a proposal's resolver or compliance key",
+              "(Config::check_proposal_terms). Pubkey::default() (what Config::new writes, and what a Config created before the field",
+              "existed reads, its reserved bytes zero) turns proposals off: submit_proposal and",
+              "approve_proposal refuse (ProposalsDisabled); the sponsor's and anyone's exits stay open."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_value",
+            "docs": [
+              "What every proposal not yet approved or closed deposited (submit_proposal adds,",
+              "approve_proposal moves it to open_value, close_proposal takes it away). It counts against",
+              "global_cap with open_value, so a direct open never takes room a proposal holds."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pending_cap",
+            "docs": [
+              "The most pending_value may reach (set_proposal_policy)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "retired",
+            "docs": [
+              "Set once by retire, never cleared: the deployment winds down. Intake refuses for good",
+              "(Config::require_intake: Retired); every payout, settle, refund and close stays open, and",
+              "close_escrow and close_config need it. A Config created before the field existed reads",
+              "false (its reserved bytes zero)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "live_escrows",
+            "docs": [
+              "The escrows opened under this Config and not yet closed: open_escrow and approve_proposal",
+              "add one, close_escrow takes one away (saturating, as a Config created before the field",
+              "existed reads 0 with escrows already open). close_config needs it at 0."
+            ],
+            "type": "u32"
+          },
+          {
             "name": "reserved",
             "docs": [
-              "Zeroed room for later fields."
+              "Zeroed room for later fields. min_regraders took the first of the 64 bytes this held,",
+              "curator, pending_value and pending_cap the next 48, and retired and live_escrows the next",
+              "5, so every offset before it and Config::SPACE stayed as they were."
             ],
             "type": {
               "array": [
                 "u8",
-                63
+                10
               ]
             }
           }
@@ -5299,6 +6640,9 @@
           },
           {
             "name": "MinRegradersSet"
+          },
+          {
+            "name": "ProposalPolicySet"
           }
         ]
       }
@@ -5431,6 +6775,58 @@
               "refuses no panel, as 1 does)."
             ],
             "type": "u8"
+          },
+          {
+            "name": "curator",
+            "docs": [
+              "The proposal policy (set_proposal_policy): the curator (Pubkey::default(): proposals off)",
+              "and the pending cap, and what proposals awaiting review hold (Config.pending_value), as",
+              "open_value is what open escrows hold. Appended after min_regraders, so a ConfigChanged from",
+              "before proposals ends where they start."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_value",
+            "type": "u64"
+          },
+          {
+            "name": "pending_cap",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigClosed",
+      "docs": [
+        "close_config: the admin, as the program's upgrade authority, closed the retired Config with",
+        "nothing left under it; its rent went to the recipient. initialize_config may create a fresh one."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "by",
+            "docs": [
+              "The admin and upgrade authority."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "recipient",
+            "docs": [
+              "Who got the Config's lamports."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
           }
         ]
       }
@@ -5492,6 +6888,44 @@
                 }
               }
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigRetired",
+      "docs": [
+        "retire: the admin retired the Config, for good. Intake refuses from here on (Retired); every",
+        "payout, settle, refund and close stays open, and close_escrow and close_config may follow."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "by",
+            "docs": [
+              "The admin."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "open_value",
+            "docs": [
+              "Config.open_value, pending_value and live_escrows when it retired: what is left to wind down."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pending_value",
+            "type": "u64"
+          },
+          {
+            "name": "live_escrows",
+            "type": "u32"
           }
         ]
       }
@@ -5967,6 +7401,57 @@
       }
     },
     {
+      "name": "EscrowClosed",
+      "docs": [
+        "close_escrow: the admin closed a retired Config's Closed escrow, its vault already closed",
+        "(refund, or the last claim's sweep) and no bond left in it; every lamport it held went to its",
+        "refund_to."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "competition_id",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
+            "name": "sponsor",
+            "type": "pubkey"
+          },
+          {
+            "name": "refund_to",
+            "docs": [
+              "Who got the lamports: the escrow's refund_to."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
+            "docs": [
+              "The lamports the escrow account held: its rent and anything donated to it."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "live_escrows",
+            "docs": [
+              "Config.live_escrows after it."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
       "name": "EscrowFunded",
       "docs": [
         "fund: the sponsor topped up the vault."
@@ -6163,7 +7648,8 @@
       "name": "EscrowTerms",
       "docs": [
         "The terms open_escrow fixes for the escrow's whole life (the competition id is its own",
-        "argument, because it seeds the PDA with the sponsor)."
+        "argument, because it seeds the PDA with the sponsor). A Proposal stores them whole (at most",
+        "MAX_REGRADERS regraders: validate refuses more), so validate stays their one validator."
       ],
       "type": {
         "kind": "struct",
@@ -6494,6 +7980,396 @@
               "The most house regraders one escrow may name (MAX_REGRADERS allows an all-house panel)."
             ],
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Proposal",
+      "docs": [
+        "One sponsor's proposal of one competition. PDA: `[\"proposal\", sponsor, competition_id]`. Its",
+        "vault is the associated token account of (this account, mint) under the classic Token program."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "decimals",
+            "docs": [
+              "The mint's decimals at the submit."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "competition_id",
+            "docs": [
+              "The competition's 16-byte UUID, a PDA seed after the sponsor (and the escrow's, once",
+              "approved)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
+            "name": "sponsor",
+            "docs": [
+              "Submitted and funded the proposal; a PDA seed. Every exit returns the deposit to its",
+              "associated token account, and both rents to it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "terms",
+            "docs": [
+              "The escrow's terms, stored whole: approve_proposal opens the escrow with exactly these."
+            ],
+            "type": {
+              "defined": {
+                "name": "EscrowTerms"
+              }
+            }
+          },
+          {
+            "name": "opens_at",
+            "docs": [
+              "Unix seconds the competition opens: review_deadline <= opens_at < terms.entries_deadline."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "review_deadline",
+            "docs": [
+              "The last second approve_proposal may land (unix seconds, wall time); after it anyone may",
+              "return the deposit (close_proposal, Expired)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "submitted_at",
+            "docs": [
+              "Unix seconds of the submit."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "deposited",
+            "docs": [
+              "What submit_proposal moved into the vault (terms.total), held in Config.pending_value."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Zeroed room for later fields."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProposalApproved",
+      "docs": [
+        "approve_proposal: the curator approved a proposal as submitted. Its escrow is open (an",
+        "EscrowOpened event follows), the deposit moved into the escrow vault, the proposal and its",
+        "vault closed (their rent to the sponsor)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposal",
+            "type": "pubkey"
+          },
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "competition_id",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
+            "name": "sponsor",
+            "type": "pubkey"
+          },
+          {
+            "name": "curator",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "terms.total: moved into the escrow vault, and from Config.pending_value to open_value."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "swept",
+            "docs": [
+              "What the proposal vault held beyond it (tokens anyone sent there), swept into the escrow",
+              "vault too, so the vault could close."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pending_value",
+            "docs": [
+              "Config.pending_value and open_value after it."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "open_value",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProposalCloseKind",
+      "docs": [
+        "Why close_proposal returned a proposal's deposit to its sponsor."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Withdrawn"
+          },
+          {
+            "name": "Rejected"
+          },
+          {
+            "name": "Expired"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProposalClosed",
+      "docs": [
+        "close_proposal: the proposal vault was swept to the sponsor's associated token account, and",
+        "the vault and the proposal closed (their rent to the sponsor)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposal",
+            "type": "pubkey"
+          },
+          {
+            "name": "sponsor",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "The tokens returned: the whole vault."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "ProposalCloseKind"
+              }
+            }
+          },
+          {
+            "name": "reason_sha256",
+            "docs": [
+              "The sha256 of the rejection document (Rejected); all zero otherwise."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "by",
+            "docs": [
+              "The signer: the sponsor (Withdrawn), the curator (Rejected), anyone past review_deadline",
+              "(Expired)."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProposalSubmitted",
+      "docs": [
+        "submit_proposal: the sponsor's deposit is in the proposal vault, its terms and schedule fixed,",
+        "awaiting the curator's review until review_deadline."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposal",
+            "type": "pubkey"
+          },
+          {
+            "name": "escrow",
+            "docs": [
+              "The escrow PDA approve_proposal opens: [\"escrow\", sponsor, competition_id]."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "competition_id",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
+            "name": "sponsor",
+            "type": "pubkey"
+          },
+          {
+            "name": "curator",
+            "docs": [
+              "The curator who co-signed the submit."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "decimals",
+            "type": "u8"
+          },
+          {
+            "name": "total",
+            "type": "u64"
+          },
+          {
+            "name": "rules_sha256",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "resolver",
+            "type": "pubkey"
+          },
+          {
+            "name": "compliance",
+            "type": "pubkey"
+          },
+          {
+            "name": "arbiter",
+            "type": "pubkey"
+          },
+          {
+            "name": "refund_to",
+            "type": "pubkey"
+          },
+          {
+            "name": "regraders",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "k",
+            "type": "u8"
+          },
+          {
+            "name": "bond_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "entries_deadline",
+            "type": "i64"
+          },
+          {
+            "name": "final_end",
+            "type": "i64"
+          },
+          {
+            "name": "resolve_deadline",
+            "type": "i64"
+          },
+          {
+            "name": "challenge_window",
+            "type": "i64"
+          },
+          {
+            "name": "attest_window",
+            "type": "i64"
+          },
+          {
+            "name": "hold_window",
+            "type": "i64"
+          },
+          {
+            "name": "claim_window",
+            "type": "i64"
+          },
+          {
+            "name": "hard_deadline",
+            "type": "i64"
+          },
+          {
+            "name": "opens_at",
+            "docs": [
+              "When the competition opens: review_deadline <= opens_at < entries_deadline."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "review_deadline",
+            "docs": [
+              "The last second approve_proposal may land; after it anyone may return the deposit."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "submitted_at",
+            "type": "i64"
+          },
+          {
+            "name": "pending_value",
+            "docs": [
+              "Config.pending_value after it (this deposit included)."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -7062,6 +8938,21 @@
       "value": "24"
     },
     {
+      "name": "MAX_PROPOSAL_BOND",
+      "docs": [
+        "The largest bond_lamports a proposal's terms may name, in lamports: 1 SOL. The resolver posts",
+        "this bond with its result and every challenger with its challenge, so a bond no one can post",
+        "is a result that never comes (the pot refunds to the sponsor at resolve_deadline) or one no",
+        "entrant can afford to challenge. The house posts at most 1 SOL as one bond",
+        "(server/chain/transport.ts HOUSE_BOND_CAP_LAMPORTS, ten times the governed min_bond), so a",
+        "proposal's bond is one the house resolver can always post. A fixed ceiling, not one in units of",
+        "the pot: the pot is in the mint's base units and the bond in lamports, and no exchange rate is",
+        "on chain."
+      ],
+      "type": "u64",
+      "value": "1000000000"
+    },
+    {
       "name": "MAX_REGRADERS",
       "docs": [
         "The most regraders an escrow names; Escrow.regraders holds this many slots."
@@ -7078,6 +8969,19 @@
       ],
       "type": "i64",
       "value": "21600"
+    },
+    {
+      "name": "MAX_REVIEW_WINDOW",
+      "docs": [
+        "The longest review a proposal may ask for, in seconds: submit_proposal refuses a",
+        "review_deadline more than this after the submit (ReviewWindowInvalid), so a slow review never",
+        "eats the entry window; the proposal expires instead, and anyone may return the deposit. 7 days",
+        "on every build: it is only a ceiling, so a short review (the test-windows schedule's 120 s,",
+        "server/proposals/schedule.ts) stays legal, and a house that reviews for days (the sandbox's",
+        "AGENTFUN_SPONSOR_REVIEW_HOURS) runs on the test-windows build too."
+      ],
+      "type": "i64",
+      "value": "604800"
     },
     {
       "name": "MAX_WINDOW",
@@ -7127,6 +9031,22 @@
       "value": "259200"
     },
     {
+      "name": "MIN_RESOLVE_WINDOW",
+      "docs": [
+        "The shortest resolve window a proposal's terms may hold, in seconds: submit_proposal and",
+        "approve_proposal refuse a resolve_deadline less than this after final_end",
+        "(ResolveWindowTooShort). 14 days, the window the house gives every escrow it opens itself",
+        "(server/routes/escrow.ts DEFAULT_RESOLVE_WINDOW_SECONDS), and more than the 9 days the house",
+        "holds a window it is asked for to (two days of final grading and regrading plus one PayoutStop,",
+        "STOP_DURATION): post_result can land only before resolve_deadline, and past it the whole pot",
+        "refunds to the sponsor, so a sponsor who sets a short window (a second, in the #852 audit's",
+        "probe P-B) gets its prize back however the competition ended. The same on every build: the",
+        "house's window does not shorten under `test-windows`, and the e2e runs post well inside it."
+      ],
+      "type": "i64",
+      "value": "1209600"
+    },
+    {
       "name": "MIN_REVEAL_GRACE",
       "docs": [
         "The shortest reveal grace Config accepts, in seconds: how long after challenge_deadline a",
@@ -7134,6 +9054,16 @@
       ],
       "type": "i64",
       "value": "300"
+    },
+    {
+      "name": "PROPOSAL_SEED",
+      "docs": [
+        "Seed of a Proposal PDA: `[\"proposal\", sponsor, competition_id]`, the competition id the escrow",
+        "PDA it opens on approval takes too. The sponsor is in the seeds, so nobody can submit a",
+        "sponsor's competition first and squat its address."
+      ],
+      "type": "bytes",
+      "value": "[112, 114, 111, 112, 111, 115, 97, 108]"
     },
     {
       "name": "RESULT_COMMITMENT_DOMAIN",

@@ -36,9 +36,10 @@ use {
         merkle::{compute_leaf_hash, hash_pair},
         result_commitment, AllowList, ArbiterChoice, Attestation, ChallengeRecord, ClaimReceipt,
         CommitRecord, Config, ConfigInit, ConfigRole, Escrow, EscrowRole, EscrowTerms, Floors,
-        Limits, RegraderEntry, StopState, ARBITER_SLACK, ATTESTATION_SEED, CLAIM_SEED, ESCROW_SEED,
-        EVENT_AUTHORITY_AND_BUMP, HOLD_REVIEW, MIN_ATTEST_WINDOW, MIN_CHALLENGE_WINDOW,
-        MIN_CLAIM_WINDOW, MIN_HOLD_WINDOW, MIN_REVEAL_GRACE,
+        Limits, Proposal, RegraderEntry, StopState, ARBITER_SLACK, ATTESTATION_SEED, CLAIM_SEED,
+        ESCROW_SEED, EVENT_AUTHORITY_AND_BUMP, HOLD_REVIEW, MIN_ATTEST_WINDOW,
+        MIN_CHALLENGE_WINDOW, MIN_CLAIM_WINDOW, MIN_HOLD_WINDOW, MIN_RESOLVE_WINDOW,
+        MIN_REVEAL_GRACE,
     },
     solana_account::Account,
     solana_keypair::Keypair,
@@ -60,6 +61,9 @@ pub const SOL: u64 = 1_000_000_000;
 /// What the sponsor's funding account holds, and the attacker's (donations into the vault).
 pub const SPONSOR_FUNDS: u64 = 4 * TOTAL;
 pub const ATTACKER_FUNDS: u64 = TOTAL;
+/// What the user sponsor's funding account holds (Role::UserSponsor, World::user_funding): its
+/// proposal's deposit and as much again.
+pub const USER_FUNDS: u64 = 2 * TOTAL;
 
 pub const HOUR: i64 = 3_600;
 pub const DAY: i64 = 24 * HOUR;
@@ -96,6 +100,28 @@ pub const SPARES: u8 = 2;
 /// never runs it out of them.
 pub const WATCHERS: u8 = prize_escrow::MAX_REVOKED as u8 + 1;
 
+/// The competition id of the user sponsor's proposal (open_proposals), beside the escrow's CID.
+pub const PROPOSAL_CID: [u8; 16] = [0x9a; 16];
+/// The competition id of a second proposal the user sponsor submits on its own terms (the
+/// blast-radius oracle's Compromise::UserSponsor).
+pub const USER_CID: [u8; 16] = [0x9b; 16];
+/// Config.pending_cap once open_proposals turned proposals on.
+pub const PENDING_CAP: u64 = 10 * TOTAL;
+/// The review a proposal asks for: review_deadline is this long after its submit.
+pub const REVIEW: i64 = 2 * DAY;
+
+/// A proposal as its sponsor submitted it: the sponsor and the competition id, the terms the
+/// escrow opens with, the schedule, and the wall time of the submit.
+#[derive(Clone, Debug)]
+pub struct ProposalSetup {
+    pub sponsor: Pubkey,
+    pub cid: [u8; 16],
+    pub terms: EscrowTerms,
+    pub opens_at: i64,
+    pub review_deadline: i64,
+    pub submitted_at: i64,
+}
+
 // ------------------------------------------------------------------------------- the keys
 
 /// Every key a test or the oracle signs with. The first SEATS regraders are the panel at open; the
@@ -122,6 +148,11 @@ pub enum Role {
     Payer,
     /// A compliance key the admin rotates in (F4), and a resolver one (F5).
     Spare(u8),
+    /// The Config's curator: co-signs a sponsor's submit_proposal, approves or rejects proposals.
+    Curator,
+    /// A user sponsor: off the sponsor allowlist, it opens an escrow only through a proposal
+    /// (World::open_proposals submits its proposal), from its own funding account.
+    UserSponsor,
 }
 
 impl Role {
@@ -156,6 +187,8 @@ impl Role {
             Role::Watcher(i) => (10, i),
             Role::Payer => (11, 0),
             Role::Spare(i) => (12, i),
+            Role::Curator => (13, 0),
+            Role::UserSponsor => (14, 0),
         };
         Keypair::new_from_array(
             solana_sha256_hasher::hashv(&[b"prize-escrow/safeguard-tests", &[tag, index]])
@@ -184,6 +217,8 @@ impl Role {
         roles.extend((0..4).map(Role::Attacker));
         roles.extend((0..WATCHERS).map(Role::Watcher));
         roles.extend((0..2).map(Role::Spare));
+        roles.push(Role::Curator);
+        roles.push(Role::UserSponsor);
         roles
     }
 
@@ -497,8 +532,13 @@ pub struct World {
     pub funding: Pubkey,
     /// The attacker's token account it donates into the vault from.
     pub attacker_funding: Pubkey,
+    /// The user sponsor's funding account (Role::UserSponsor's, USER_FUNDS): its proposals'
+    /// deposits.
+    pub user_funding: Pubkey,
     pub cid: [u8; 16],
     pub terms: EscrowTerms,
+    /// The user sponsor's proposal at PROPOSAL_CID, once open_proposals submitted it.
+    pub proposal: Option<ProposalSetup>,
     /// The escrow PDA (the sponsor's, at `cid`) and its vault, derived once.
     escrow_key: Pubkey,
     vault_key: Pubkey,
@@ -583,7 +623,8 @@ impl World {
         let mint = Role::Admin.pubkey_derived(b"mint");
         let funding = Role::Sponsor.pubkey_derived(b"funding");
         let attacker_funding = Role::Attacker(0).pubkey_derived(b"funding");
-        put_mint(c, mint, SPONSOR_FUNDS + ATTACKER_FUNDS);
+        let user_funding = Role::UserSponsor.pubkey_derived(b"funding");
+        put_mint(c, mint, SPONSOR_FUNDS + ATTACKER_FUNDS + USER_FUNDS);
         put_token_account(
             c,
             funding,
@@ -600,6 +641,14 @@ impl World {
             ATTACKER_FUNDS,
             false,
         );
+        put_token_account(
+            c,
+            user_funding,
+            mint,
+            Role::UserSponsor.pubkey(),
+            USER_FUNDS,
+            false,
+        );
         set_upgrade_authority(c, Some(Role::Admin.pubkey()));
         let escrow_key = escrow_pda(&Role::Sponsor.pubkey(), &CID);
         let world = World {
@@ -607,8 +656,10 @@ impl World {
             mint,
             funding,
             attacker_funding,
+            user_funding,
             cid: CID,
             terms: Self::default_terms(),
+            proposal: None,
             escrow_key,
             vault_key: get_associated_token_address(&escrow_key, &mint),
         };
@@ -777,7 +828,19 @@ impl World {
         mint: Pubkey,
         terms: &EscrowTerms,
     ) -> Instruction {
-        let escrow = escrow_pda(&sponsor, &self.cid);
+        self.open_ix_at(sponsor, funding, mint, self.cid, terms)
+    }
+
+    /// open_escrow by `sponsor` at any competition id.
+    pub fn open_ix_at(
+        &self,
+        sponsor: Pubkey,
+        funding: Pubkey,
+        mint: Pubkey,
+        cid: [u8; 16],
+        terms: &EscrowTerms,
+    ) -> Instruction {
+        let escrow = escrow_pda(&sponsor, &cid);
         instruction(
             accts::OpenEscrow {
                 sponsor,
@@ -793,20 +856,31 @@ impl World {
                 program: prize_escrow::ID,
             },
             ixs::OpenEscrow {
-                competition_id: self.cid,
+                competition_id: cid,
                 terms: terms.clone(),
             },
         )
     }
 
     pub fn fund_ix(&self, sponsor: Pubkey, amount: u64) -> Instruction {
+        self.fund_at_ix(sponsor, self.funding, self.escrow(), amount)
+    }
+
+    /// fund of the escrow at `escrow` by `sponsor` from `funding`.
+    pub fn fund_at_ix(
+        &self,
+        sponsor: Pubkey,
+        funding: Pubkey,
+        escrow: Pubkey,
+        amount: u64,
+    ) -> Instruction {
         instruction(
             accts::Fund {
                 sponsor,
-                escrow: self.escrow(),
+                escrow,
                 mint: self.mint,
-                sponsor_token_account: self.funding,
-                vault: self.vault(),
+                sponsor_token_account: funding,
+                vault: get_associated_token_address(&escrow, &self.mint),
                 token_program: token::ID,
                 config: Config::pda().0,
                 event_authority: EVENT_AUTHORITY,
@@ -1122,13 +1196,24 @@ impl World {
     }
 
     pub fn refund_ix(&self, escrow: &Escrow) -> Instruction {
+        self.refund_at_ix(self.escrow(), escrow, None)
+    }
+
+    /// refund of the escrow at `address` (its state `escrow`), the vault swept to refund_to's
+    /// associated token account, or to `destination` (a token account refund_to owns) when named.
+    pub fn refund_at_ix(
+        &self,
+        address: Pubkey,
+        escrow: &Escrow,
+        destination: Option<Pubkey>,
+    ) -> Instruction {
         let refund_to = escrow.refund_to;
         instruction(
             accts::Refund {
                 payer: Role::Payer.pubkey(),
-                escrow: self.escrow(),
+                escrow: address,
                 mint: self.mint,
-                vault: self.vault(),
+                vault: get_associated_token_address(&address, &self.mint),
                 refund_to,
                 refund_to_token_account: self.ata(&refund_to),
                 resolver: escrow.resolver,
@@ -1136,6 +1221,7 @@ impl World {
                 associated_token_program: associated_token::ID,
                 system_program: system_program::ID,
                 config: Config::pda().0,
+                destination,
                 event_authority: EVENT_AUTHORITY,
                 program: prize_escrow::ID,
             },
@@ -1180,6 +1266,64 @@ impl World {
                 program: prize_escrow::ID,
             },
             ixs::CloseAttestation {},
+        )
+    }
+
+    /// close_receipt of `claimant`'s receipt on this world's escrow, its rent back to `claimant`
+    /// (no key of the claimant's signs: any fee payer sends it).
+    pub fn close_receipt_ix(&self, claimant: Pubkey) -> Instruction {
+        instruction(
+            accts::CloseReceipt {
+                claimant,
+                escrow: self.escrow(),
+                receipt: self.receipt(&claimant),
+                event_authority: EVENT_AUTHORITY,
+                program: prize_escrow::ID,
+            },
+            ixs::CloseReceipt {},
+        )
+    }
+
+    /// retire by `admin`.
+    pub fn retire_ix(&self, admin: Pubkey) -> Instruction {
+        instruction(
+            accts::Retire {
+                admin,
+                config: Config::pda().0,
+                event_authority: EVENT_AUTHORITY,
+                program: prize_escrow::ID,
+            },
+            ixs::Retire {},
+        )
+    }
+
+    /// close_escrow by `admin` of the escrow at `escrow`, its lamports to `refund_to`.
+    pub fn close_escrow_ix(&self, admin: Pubkey, escrow: Pubkey, refund_to: Pubkey) -> Instruction {
+        instruction(
+            accts::CloseEscrow {
+                admin,
+                config: Config::pda().0,
+                escrow,
+                refund_to,
+                event_authority: EVENT_AUTHORITY,
+                program: prize_escrow::ID,
+            },
+            ixs::CloseEscrow {},
+        )
+    }
+
+    /// close_config by `admin` (the upgrade authority too), its rent to `recipient`.
+    pub fn close_config_ix(&self, admin: Pubkey, recipient: Pubkey) -> Instruction {
+        instruction(
+            accts::CloseConfig {
+                admin,
+                config: Config::pda().0,
+                program_data: program_data_pda(),
+                recipient,
+                event_authority: EVENT_AUTHORITY,
+                program: prize_escrow::ID,
+            },
+            ixs::CloseConfig {},
         )
     }
 
@@ -1337,6 +1481,337 @@ impl World {
             data,
         }
     }
+
+    // --------------------------------------------------------------------- the proposals
+
+    /// The default terms moved to a proposal submitted at wall time `at`: review_deadline REVIEW
+    /// later, the competition opening then, its entries a day after and its final phase a day
+    /// after that, as the default terms space them, a resolve window of MIN_RESOLVE_WINDOW (the
+    /// shortest a proposal may hold) and the earliest hard deadline after it. Returns (terms,
+    /// opens_at, review_deadline).
+    pub fn proposal_terms(at: i64) -> (EscrowTerms, i64, i64) {
+        let review_deadline = at + REVIEW;
+        let shift = review_deadline + DAY - ENTRIES_DEADLINE;
+        let base = Self::default_terms();
+        let final_end = base.final_end + shift;
+        let resolve_deadline = final_end + MIN_RESOLVE_WINDOW;
+        let terms = EscrowTerms {
+            entries_deadline: base.entries_deadline + shift,
+            final_end,
+            resolve_deadline,
+            hard_deadline: base.hard_deadline - base.resolve_deadline + resolve_deadline,
+            ..base
+        };
+        (terms, review_deadline, review_deadline)
+    }
+
+    /// proposal_terms for the user sponsor (Role::UserSponsor): refund_to is its key.
+    pub fn user_proposal_terms(at: i64) -> (EscrowTerms, i64, i64) {
+        let (mut terms, opens_at, review_deadline) = Self::proposal_terms(at);
+        terms.refund_to = Role::UserSponsor.pubkey();
+        (terms, opens_at, review_deadline)
+    }
+
+    /// The proposal PDA ["proposal", sponsor, cid].
+    pub fn proposal_at(&self, sponsor: &Pubkey, cid: &[u8; 16]) -> Pubkey {
+        Proposal::pda(sponsor, cid).0
+    }
+
+    /// The proposal's vault: its associated token account of the mint.
+    pub fn proposal_vault_at(&self, sponsor: &Pubkey, cid: &[u8; 16]) -> Pubkey {
+        get_associated_token_address(&self.proposal_at(sponsor, cid), &self.mint)
+    }
+
+    /// The escrow PDA ["escrow", sponsor, cid] and its vault.
+    pub fn escrow_at(&self, sponsor: &Pubkey, cid: &[u8; 16]) -> Pubkey {
+        escrow_pda(sponsor, cid)
+    }
+
+    pub fn escrow_vault_at(&self, sponsor: &Pubkey, cid: &[u8; 16]) -> Pubkey {
+        get_associated_token_address(&self.escrow_at(sponsor, cid), &self.mint)
+    }
+
+    pub fn proposal_state(
+        &self,
+        c: &impl Chain,
+        sponsor: &Pubkey,
+        cid: &[u8; 16],
+    ) -> Option<Proposal> {
+        c.anchor(&self.proposal_at(sponsor, cid))
+    }
+
+    pub fn escrow_state_at(
+        &self,
+        c: &impl Chain,
+        sponsor: &Pubkey,
+        cid: &[u8; 16],
+    ) -> Option<Escrow> {
+        c.anchor(&self.escrow_at(sponsor, cid))
+    }
+
+    pub fn set_proposal_policy_ix(
+        &self,
+        admin: Pubkey,
+        curator: Pubkey,
+        pending_cap: u64,
+    ) -> Instruction {
+        instruction(
+            self.admin_config(admin),
+            ixs::SetProposalPolicy {
+                curator,
+                pending_cap,
+            },
+        )
+    }
+
+    /// submit_proposal by `sponsor` from `funding`, co-signed by `curator`.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one per instruction argument and signer"
+    )]
+    pub fn submit_proposal_ix(
+        &self,
+        sponsor: Pubkey,
+        curator: Pubkey,
+        funding: Pubkey,
+        cid: [u8; 16],
+        terms: &EscrowTerms,
+        opens_at: i64,
+        review_deadline: i64,
+    ) -> Instruction {
+        instruction(
+            accts::SubmitProposal {
+                sponsor,
+                curator,
+                proposal: self.proposal_at(&sponsor, &cid),
+                mint: self.mint,
+                sponsor_token_account: funding,
+                proposal_vault: self.proposal_vault_at(&sponsor, &cid),
+                escrow: self.escrow_at(&sponsor, &cid),
+                config: Config::pda().0,
+                token_program: token::ID,
+                associated_token_program: associated_token::ID,
+                system_program: system_program::ID,
+                event_authority: EVENT_AUTHORITY,
+                program: prize_escrow::ID,
+            },
+            ixs::SubmitProposal {
+                competition_id: cid,
+                terms: terms.clone(),
+                opens_at,
+                review_deadline,
+            },
+        )
+    }
+
+    /// approve_proposal by `curator` of `sponsor`'s proposal at `cid`.
+    pub fn approve_proposal_ix(
+        &self,
+        curator: Pubkey,
+        sponsor: Pubkey,
+        cid: [u8; 16],
+    ) -> Instruction {
+        instruction(
+            accts::ApproveProposal {
+                curator,
+                proposal: self.proposal_at(&sponsor, &cid),
+                proposal_vault: self.proposal_vault_at(&sponsor, &cid),
+                escrow: self.escrow_at(&sponsor, &cid),
+                escrow_vault: self.escrow_vault_at(&sponsor, &cid),
+                mint: self.mint,
+                sponsor,
+                config: Config::pda().0,
+                token_program: token::ID,
+                associated_token_program: associated_token::ID,
+                system_program: system_program::ID,
+                event_authority: EVENT_AUTHORITY,
+                program: prize_escrow::ID,
+            },
+            ixs::ApproveProposal {},
+        )
+    }
+
+    /// close_proposal by `authority` of `sponsor`'s proposal at `cid`, naming `reason_sha256`.
+    pub fn close_proposal_ix(
+        &self,
+        authority: Pubkey,
+        sponsor: Pubkey,
+        cid: [u8; 16],
+        reason_sha256: [u8; 32],
+    ) -> Instruction {
+        self.close_proposal_to_ix(authority, sponsor, cid, reason_sha256, None)
+    }
+
+    /// close_proposal returning the deposit to the sponsor's associated token account, or to
+    /// `destination` (a token account the sponsor owns) when named.
+    pub fn close_proposal_to_ix(
+        &self,
+        authority: Pubkey,
+        sponsor: Pubkey,
+        cid: [u8; 16],
+        reason_sha256: [u8; 32],
+        destination: Option<Pubkey>,
+    ) -> Instruction {
+        instruction(
+            accts::CloseProposal {
+                authority,
+                proposal: self.proposal_at(&sponsor, &cid),
+                proposal_vault: self.proposal_vault_at(&sponsor, &cid),
+                mint: self.mint,
+                sponsor,
+                sponsor_token_account: self.ata(&sponsor),
+                config: Config::pda().0,
+                token_program: token::ID,
+                associated_token_program: associated_token::ID,
+                system_program: system_program::ID,
+                destination,
+                event_authority: EVENT_AUTHORITY,
+                program: prize_escrow::ID,
+            },
+            ixs::CloseProposal { reason_sha256 },
+        )
+    }
+
+    /// A classic Token transfer of `amount` from the attacker's funding account into `to`.
+    pub fn donate_tokens_to_ix(&self, to: Pubkey, amount: u64) -> Instruction {
+        let mut ix = self.donate_tokens_ix(amount);
+        ix.accounts[1] = AccountMeta::new(to, false);
+        ix
+    }
+
+    /// The associated token program's CreateIdempotent of `owner`'s associated token account of
+    /// the mint, `payer` paying its rent (anyone may send it).
+    pub fn create_ata_ix(&self, payer: Pubkey, owner: Pubkey) -> Instruction {
+        Instruction {
+            program_id: associated_token::ID,
+            accounts: vec![
+                AccountMeta::new(payer, true),
+                AccountMeta::new(self.ata(&owner), false),
+                AccountMeta::new_readonly(owner, false),
+                AccountMeta::new_readonly(self.mint, false),
+                AccountMeta::new_readonly(system_program::ID, false),
+                AccountMeta::new_readonly(token::ID, false),
+            ],
+            data: vec![1],
+        }
+    }
+
+    /// A classic Token SetAuthority(AccountOwner) of the token account `account`, signed by its
+    /// owner `owner`, making `new_owner` its owner: what a classic Token account allows and an
+    /// associated one keeps its address through (the #852 audit's probe P-A).
+    pub fn set_token_owner_ix(
+        &self,
+        account: Pubkey,
+        owner: Pubkey,
+        new_owner: Pubkey,
+    ) -> Instruction {
+        let mut data = vec![6u8, 2, 1];
+        data.extend_from_slice(new_owner.as_ref());
+        Instruction {
+            program_id: token::ID,
+            accounts: vec![
+                AccountMeta::new(account, false),
+                AccountMeta::new_readonly(owner, true),
+            ],
+            data,
+        }
+    }
+
+    /// A new token account of the mint at `account`'s address, owned by `owner`, in two
+    /// instructions (each the world sends as its own transaction): the system program's
+    /// CreateAccount (`payer` and `account` sign, `lamports` its rent) and the classic Token
+    /// program's InitializeAccount3, which takes no signature of the owner's: anyone may create a
+    /// token account someone else owns.
+    pub fn create_token_account_ixs(
+        &self,
+        payer: Pubkey,
+        account: Pubkey,
+        owner: Pubkey,
+        lamports: u64,
+    ) -> [Instruction; 2] {
+        let mut create = 0u32.to_le_bytes().to_vec();
+        create.extend_from_slice(&lamports.to_le_bytes());
+        create.extend_from_slice(&(spl_token::state::Account::LEN as u64).to_le_bytes());
+        create.extend_from_slice(token::ID.as_ref());
+        let mut init = vec![18u8];
+        init.extend_from_slice(owner.as_ref());
+        [
+            Instruction {
+                program_id: system_program::ID,
+                accounts: vec![
+                    AccountMeta::new(payer, true),
+                    AccountMeta::new(account, true),
+                ],
+                data: create,
+            },
+            Instruction {
+                program_id: token::ID,
+                accounts: vec![
+                    AccountMeta::new(account, false),
+                    AccountMeta::new_readonly(self.mint, false),
+                ],
+                data: init,
+            },
+        ]
+    }
+
+    /// Creates a token account of the mint owned by `owner` at the address of `key` (a fresh
+    /// keypair), the Payer paying, through the chain (create_token_account_ixs). Whether both
+    /// transactions landed.
+    pub fn create_token_account(&self, c: &mut impl Chain, key: &Keypair, owner: Pubkey) -> bool {
+        let lamports = c.rent_exempt(spl_token::state::Account::LEN);
+        let [create, init] =
+            self.create_token_account_ixs(Role::Payer.pubkey(), key.pubkey(), owner, lamports);
+        self.send(c, create, &[key]).ok && self.send(c, init, &[]).ok
+    }
+
+    /// Turns proposals on (Role::Curator, PENDING_CAP) and submits the user sponsor's proposal of
+    /// PROPOSAL_CID now (World::user_proposal_terms), co-signed by the curator, from the user
+    /// sponsor's funding account: what the blast-radius oracle plays proposals against.
+    pub fn open_proposals(&mut self, c: &mut impl Chain) {
+        let policy =
+            self.set_proposal_policy_ix(Role::Admin.pubkey(), Role::Curator.pubkey(), PENDING_CAP);
+        expect_ok(
+            self.send(c, policy, &[&Role::Admin.keypair()]),
+            "set_proposal_policy",
+        );
+        let at = c.time();
+        let sponsor = Role::UserSponsor.pubkey();
+        let (terms, opens_at, review_deadline) = Self::user_proposal_terms(at);
+        let submit = self.submit_proposal_ix(
+            sponsor,
+            Role::Curator.pubkey(),
+            self.user_funding,
+            PROPOSAL_CID,
+            &terms,
+            opens_at,
+            review_deadline,
+        );
+        expect_ok(
+            self.send(
+                c,
+                submit,
+                &[&Role::UserSponsor.keypair(), &Role::Curator.keypair()],
+            ),
+            "submit_proposal",
+        );
+        self.proposal = Some(ProposalSetup {
+            sponsor,
+            cid: PROPOSAL_CID,
+            terms,
+            opens_at,
+            review_deadline,
+            submitted_at: at,
+        });
+    }
+}
+
+/// A keypair derived from `what`, the same on every run: for accounts a test or an honest party
+/// creates at a fresh address (a token account an owner holds besides its associated one).
+pub fn keypair_derived(what: &[u8]) -> Keypair {
+    Keypair::new_from_array(
+        solana_sha256_hasher::hashv(&[b"prize-escrow/derived-keypair", what]).to_bytes(),
+    )
 }
 
 impl Role {

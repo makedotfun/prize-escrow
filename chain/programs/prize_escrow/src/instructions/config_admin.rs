@@ -1,6 +1,7 @@
 //! Creating the Config and the admin's setters: the admin (two steps), the guardian and the
-//! arbiter, the limits, the panel floor, the window floors and the allowlists. Each emits
-//! ConfigChanged with Config's settings after it.
+//! arbiter, the limits, the panel floor, the window floors, the allowlists and the proposal
+//! policy (the curator and the pending cap). Each emits ConfigChanged with Config's settings
+//! after it.
 
 use anchor_lang::{prelude::*, solana_program::bpf_loader_upgradeable};
 
@@ -45,6 +46,9 @@ pub(crate) fn config_changed(
         min_claim_window: config.min_claim_window,
         reveal_grace: config.reveal_grace,
         min_regraders: config.min_regraders,
+        curator: config.curator,
+        pending_value: config.pending_value,
+        pending_cap: config.pending_cap,
     }
 }
 
@@ -149,12 +153,17 @@ pub struct AcceptAdmin<'info> {
 /// The key propose_admin named becomes the admin (NotPendingAdmin for any other signer), unless it
 /// is revoked (KeyRevoked, as at every other signer site): the admin's key can never be revoked
 /// (set_revoked's CannotRevokeAdmin), so a revoked key never becomes it. The proposal stays
-/// pending; the key takes the Config once the admin unrevokes it.
+/// pending; the key takes the Config once the admin unrevokes it. Nor does the curator's key ever
+/// become it (CuratorNotIndependent): the curator is a key of its own.
 pub fn handle_accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
     let new_admin = ctx.accounts.new_admin.key();
     require!(new_admin != Pubkey::default(), EscrowError::NotPendingAdmin);
     let config = &mut ctx.accounts.config;
     config.require_not_revoked(&new_admin)?;
+    require!(
+        !config.is_curator(&new_admin),
+        EscrowError::CuratorNotIndependent
+    );
     config.admin = new_admin;
     config.pending_admin = Pubkey::default();
     let event = config_changed(
@@ -175,7 +184,8 @@ pub fn handle_accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
 /// keys: it could sign nothing in that role anyway (guard_role and arbiter_resolve refuse a
 /// revoked signer), so naming it would leave the Config with no working guardian or arbiter until
 /// the admin unrevoked it. A new arbiter answers for every escrow at once: arbiter_resolve checks
-/// Config's.
+/// Config's. The curator's key is refused (CuratorNotIndependent), as set_proposal_policy refuses
+/// the guardian's or the arbiter's as the curator.
 pub fn handle_set_config_role(
     ctx: Context<AdminConfig>,
     role: ConfigRole,
@@ -184,6 +194,7 @@ pub fn handle_set_config_role(
     require!(key != Pubkey::default(), EscrowError::InvalidConfig);
     let config = &mut ctx.accounts.config;
     config.require_not_revoked(&key)?;
+    require!(!config.is_curator(&key), EscrowError::CuratorNotIndependent);
     let change = match role {
         ConfigRole::Guardian => {
             config.guardian = key;
@@ -256,6 +267,32 @@ pub fn handle_set_floors(ctx: Context<AdminConfig>, floors: Floors) -> Result<()
         ConfigChange::FloorsSet,
         ctx.accounts.admin.key(),
         Pubkey::default(),
+        None,
+        false,
+    );
+    emit_cpi!(event);
+    Ok(())
+}
+
+/// Names the curator (Pubkey::default(): proposals off on chain) and the pending cap
+/// (Config::set_proposal_policy: never a revoked key, KeyRevoked, nor the admin's, the guardian's
+/// or the arbiter's, CuratorNotIndependent). The Limits and ConfigInit wire formats are
+/// untouched: initialize_config and set_limits leave both as they are. Proposals already
+/// submitted stay: the new curator reviews them (a replaced one is refused,
+/// UnauthorizedCurator), and their deposits stay in pending_value whatever the new cap.
+pub fn handle_set_proposal_policy(
+    ctx: Context<AdminConfig>,
+    curator: Pubkey,
+    pending_cap: u64,
+) -> Result<()> {
+    let config = &mut ctx.accounts.config;
+    config.set_proposal_policy(curator, pending_cap)?;
+    let event = config_changed(
+        config.key(),
+        config,
+        ConfigChange::ProposalPolicySet,
+        ctx.accounts.admin.key(),
+        curator,
         None,
         false,
     );

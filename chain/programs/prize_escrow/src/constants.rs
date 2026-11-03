@@ -188,9 +188,58 @@ pub const MAX_REGISTRY: usize = 16;
 /// The most keys Config.revoked holds.
 pub const MAX_REVOKED: usize = 16;
 
+/// Seed of a Proposal PDA: `["proposal", sponsor, competition_id]`, the competition id the escrow
+/// PDA it opens on approval takes too. The sponsor is in the seeds, so nobody can submit a
+/// sponsor's competition first and squat its address.
+#[constant]
+pub const PROPOSAL_SEED: &[u8] = b"proposal";
+
+/// The longest review a proposal may ask for, in seconds: submit_proposal refuses a
+/// review_deadline more than this after the submit (ReviewWindowInvalid), so a slow review never
+/// eats the entry window; the proposal expires instead, and anyone may return the deposit. 7 days
+/// on every build: it is only a ceiling, so a short review (the test-windows schedule's 120 s,
+/// server/proposals/schedule.ts) stays legal, and a house that reviews for days (the sandbox's
+/// AGENTFUN_SPONSOR_REVIEW_HOURS) runs on the test-windows build too.
+#[constant]
+pub const MAX_REVIEW_WINDOW: i64 = 7 * 24 * HOUR;
+
+/// The shortest resolve window a proposal's terms may hold, in seconds: submit_proposal and
+/// approve_proposal refuse a resolve_deadline less than this after final_end
+/// (ResolveWindowTooShort). 14 days, the window the house gives every escrow it opens itself
+/// (server/routes/escrow.ts DEFAULT_RESOLVE_WINDOW_SECONDS), and more than the 9 days the house
+/// holds a window it is asked for to (two days of final grading and regrading plus one PayoutStop,
+/// STOP_DURATION): post_result can land only before resolve_deadline, and past it the whole pot
+/// refunds to the sponsor, so a sponsor who sets a short window (a second, in the #852 audit's
+/// probe P-B) gets its prize back however the competition ended. The same on every build: the
+/// house's window does not shorten under `test-windows`, and the e2e runs post well inside it.
+#[constant]
+pub const MIN_RESOLVE_WINDOW: i64 = 14 * 24 * HOUR;
+
+const _: () = assert!(
+    MIN_RESOLVE_WINDOW >= 2 * 24 * HOUR + STOP_DURATION,
+    "a proposal's resolve window holds two days of grading and one PayoutStop"
+);
+
+/// The largest bond_lamports a proposal's terms may name, in lamports: 1 SOL. The resolver posts
+/// this bond with its result and every challenger with its challenge, so a bond no one can post
+/// is a result that never comes (the pot refunds to the sponsor at resolve_deadline) or one no
+/// entrant can afford to challenge. The house posts at most 1 SOL as one bond
+/// (server/chain/transport.ts HOUSE_BOND_CAP_LAMPORTS, ten times the governed min_bond), so a
+/// proposal's bond is one the house resolver can always post. A fixed ceiling, not one in units of
+/// the pot: the pot is in the mint's base units and the bond in lamports, and no exchange rate is
+/// on chain.
+#[constant]
+pub const MAX_PROPOSAL_BOND: u64 = 1_000_000_000;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_proposal_bounds_are_the_houses_own() {
+        assert_eq!(MIN_RESOLVE_WINDOW, 14 * 24 * HOUR);
+        assert_eq!(MAX_PROPOSAL_BOND, 1_000_000_000);
+    }
 
     #[test]
     fn reveal_grace_bounds_follow_the_test_windows_feature() {
@@ -200,6 +249,12 @@ mod tests {
             assert_eq!((MIN_REVEAL_GRACE, MAX_REVEAL_GRACE), (5 * 60, 6 * HOUR));
         }
         assert_eq!(STOP_DURATION, 7 * 24 * HOUR);
+    }
+
+    #[test]
+    fn the_review_window_is_seven_days_on_every_build() {
+        assert_eq!(MAX_REVIEW_WINDOW, 7 * 24 * HOUR);
+        assert_eq!(PROPOSAL_SEED, b"proposal");
     }
 
     #[test]

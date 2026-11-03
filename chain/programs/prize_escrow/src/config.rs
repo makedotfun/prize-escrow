@@ -6,7 +6,8 @@
 //! stopped, by a global PayoutStop or its own guardian freeze, counted once when both overlap:
 //! - G(t), the global stopped seconds up to wall time t: Config.stopped_secs (every PayoutStop
 //!   that ended) plus the part of the PayoutStop in force that has elapsed by t (a stop lapses at
-//!   stop_expires_at). Only PayoutStop stops the clock; IntakeStop refuses open and fund only.
+//!   stop_expires_at). Only PayoutStop stops the clock; IntakeStop refuses only the deposits
+//!   (open_escrow, fund, submit_proposal) and approve_proposal.
 //! - Γ(t) = t - G(t), the global clock: it stands still while a PayoutStop is in force.
 //! - A freeze is measured on Γ: it began at Γ = freeze_since and lapses at Γ = freeze_until, so a
 //!   PayoutStop during a freeze also holds the freeze's own lapse back, and the escrow's frozen
@@ -27,8 +28,9 @@ use anchor_lang::prelude::*;
 
 use crate::{
     constants::{
-        CONFIG_SEED, DEFAULT_MIN_REGRADERS, MAX_MINTS, MAX_REGISTRY, MAX_REGRADERS,
-        MAX_REVEAL_GRACE, MAX_REVOKED, MAX_SPONSORS, MAX_WINDOW, MIN_REVEAL_GRACE, STOP_DURATION,
+        CONFIG_SEED, DEFAULT_MIN_REGRADERS, MAX_MINTS, MAX_PROPOSAL_BOND, MAX_REGISTRY,
+        MAX_REGRADERS, MAX_REVEAL_GRACE, MAX_REVOKED, MAX_SPONSORS, MAX_WINDOW, MIN_RESOLVE_WINDOW,
+        MIN_REVEAL_GRACE, STOP_DURATION,
     },
     error::EscrowError,
     state::{Escrow, EscrowTerms},
@@ -51,10 +53,12 @@ use crate::{
 pub enum StopState {
     /// Nothing is stopped.
     Normal,
-    /// open_escrow and fund are refused.
+    /// open_escrow, fund, submit_proposal and approve_proposal are refused (close_proposal is
+    /// not: a deposit always has its way back).
     IntakeStop,
-    /// open_escrow and fund, and every payout (claim, refund, settle and arbiter_resolve), are
-    /// refused, and every escrow's clock stands still.
+    /// open_escrow, fund, submit_proposal and approve_proposal, and every payout (claim, refund,
+    /// settle, arbiter_resolve and close_proposal), are refused, and every escrow's clock stands
+    /// still.
     PayoutStop,
 }
 
@@ -227,8 +231,32 @@ pub struct Config {
     /// bytes `reserved` held, so a Config written before it reads 0 here, which refuses no panel
     /// (every panel names at least one regrader), as 1 does.
     pub min_regraders: u8,
-    /// Zeroed room for later fields.
-    pub reserved: [u8; 63],
+    /// The key that co-signs a sponsor's submit_proposal (after the house screened the sponsor)
+    /// and approves the proposal as submitted or rejects it back to the sponsor, and nothing else:
+    /// it never sponsors a proposal, nor is a proposal's resolver or compliance key
+    /// (Config::check_proposal_terms). Pubkey::default() (what Config::new writes, and what a Config created before the field
+    /// existed reads, its reserved bytes zero) turns proposals off: submit_proposal and
+    /// approve_proposal refuse (ProposalsDisabled); the sponsor's and anyone's exits stay open.
+    pub curator: Pubkey,
+    /// What every proposal not yet approved or closed deposited (submit_proposal adds,
+    /// approve_proposal moves it to open_value, close_proposal takes it away). It counts against
+    /// global_cap with open_value, so a direct open never takes room a proposal holds.
+    pub pending_value: u64,
+    /// The most pending_value may reach (set_proposal_policy).
+    pub pending_cap: u64,
+    /// Set once by retire, never cleared: the deployment winds down. Intake refuses for good
+    /// (Config::require_intake: Retired); every payout, settle, refund and close stays open, and
+    /// close_escrow and close_config need it. A Config created before the field existed reads
+    /// false (its reserved bytes zero).
+    pub retired: bool,
+    /// The escrows opened under this Config and not yet closed: open_escrow and approve_proposal
+    /// add one, close_escrow takes one away (saturating, as a Config created before the field
+    /// existed reads 0 with escrows already open). close_config needs it at 0.
+    pub live_escrows: u32,
+    /// Zeroed room for later fields. min_regraders took the first of the 64 bytes this held,
+    /// curator, pending_value and pending_cap the next 48, and retired and live_escrows the next
+    /// 5, so every offset before it and Config::SPACE stayed as they were.
+    pub reserved: [u8; 10],
 }
 
 impl Config {
@@ -240,7 +268,8 @@ impl Config {
         Pubkey::find_program_address(&[CONFIG_SEED], &crate::ID)
     }
 
-    /// A fresh Config from `init`, the bucket full, nothing stopped or revoked.
+    /// A fresh Config from `init`, the bucket full, nothing stopped or revoked, no curator
+    /// (proposals off until set_proposal_policy names one).
     pub fn new(init: ConfigInit, bump: u8, now: i64) -> Result<Self> {
         require!(
             init.admin != Pubkey::default()
@@ -285,7 +314,12 @@ impl Config {
             regraders: Vec::new(),
             revoked: Vec::new(),
             min_regraders: DEFAULT_MIN_REGRADERS,
-            reserved: [0; 63],
+            curator: Pubkey::default(),
+            pending_value: 0,
+            pending_cap: 0,
+            retired: false,
+            live_escrows: 0,
+            reserved: [0; 10],
         };
         config.set_limits(&init.limits, now)?;
         config.flow_level = config.flow_capacity;
@@ -448,12 +482,23 @@ impl Config {
         };
     }
 
-    /// Refuses open_escrow and fund while IntakeStop or PayoutStop is in force.
+    /// Refuses open_escrow, fund, submit_proposal and approve_proposal while IntakeStop or
+    /// PayoutStop is in force, and for good once the Config is retired.
     pub fn require_intake(&self, now: i64) -> Result<()> {
+        require!(!self.retired, EscrowError::Retired);
         require!(
             self.stop_level(now) == StopState::Normal,
             EscrowError::IntakeStopped
         );
+        Ok(())
+    }
+
+    /// One more escrow opened under this Config (open_escrow, approve_proposal).
+    pub fn escrow_opened(&mut self) -> Result<()> {
+        self.live_escrows = self
+            .live_escrows
+            .checked_add(1)
+            .ok_or(EscrowError::MathOverflow)?;
         Ok(())
     }
 
@@ -513,17 +558,23 @@ impl Config {
     // ------------------------------------------------------------------- caps
 
     /// Adds `amount` to what one escrow holds (`deposited` before it) and to open_value, held to
-    /// C_e (EscrowCapExceeded) and C_g (GlobalCapExceeded). Returns the escrow's new deposited.
+    /// C_e (EscrowCapExceeded) and, with what proposals awaiting review hold, to C_g:
+    /// open_value + pending_value + amount <= global_cap (GlobalCapExceeded), so a direct open or
+    /// a fund never takes the room a pending proposal holds. Returns the escrow's new deposited.
     pub fn deposit(&mut self, deposited: u64, amount: u64) -> Result<u64> {
         let escrow_total = deposited
             .checked_add(amount)
             .filter(|total| *total <= self.escrow_cap)
             .ok_or(EscrowError::EscrowCapExceeded)?;
-        self.open_value = self
+        let open_value = self
             .open_value
             .checked_add(amount)
-            .filter(|total| *total <= self.global_cap)
+            .filter(|open| {
+                open.checked_add(self.pending_value)
+                    .is_some_and(|held| held <= self.global_cap)
+            })
             .ok_or(EscrowError::GlobalCapExceeded)?;
+        self.open_value = open_value;
         Ok(escrow_total)
     }
 
@@ -535,10 +586,137 @@ impl Config {
         self.open_value = self.open_value.saturating_sub(deposited);
     }
 
+    /// Adds a submitted proposal's deposit `amount` to pending_value: the one escrow it would open
+    /// within C_e (EscrowCapExceeded), the proposals awaiting review within pending_cap
+    /// (PendingCapExceeded), and open_value + pending_value + amount within C_g
+    /// (GlobalCapExceeded).
+    pub fn reserve_pending(&mut self, amount: u64) -> Result<()> {
+        require!(amount <= self.escrow_cap, EscrowError::EscrowCapExceeded);
+        let pending_value = self
+            .pending_value
+            .checked_add(amount)
+            .filter(|pending| *pending <= self.pending_cap)
+            .ok_or(EscrowError::PendingCapExceeded)?;
+        require!(
+            pending_value
+                .checked_add(self.open_value)
+                .is_some_and(|held| held <= self.global_cap),
+            EscrowError::GlobalCapExceeded
+        );
+        self.pending_value = pending_value;
+        Ok(())
+    }
+
+    /// Moves an approved proposal's deposit `amount` from pending_value to open_value, the one
+    /// escrow it opens held to today's C_e (EscrowCapExceeded): the approval opens an escrow, and
+    /// no escrow opens over the per-escrow cap in force, however it was submitted (the curator
+    /// rejects instead). Its room under C_g was taken at submit (reserve_pending), so
+    /// open_value + pending_value does not move and C_g is not read again: a C_g lowered since
+    /// refuses only new deposits, as it does for open escrows. pending_value always holds the
+    /// amount (only reserve_pending adds to it), so the subtraction never saturates (MathOverflow
+    /// if it ever could not).
+    pub fn approve_pending(&mut self, amount: u64) -> Result<()> {
+        require!(amount <= self.escrow_cap, EscrowError::EscrowCapExceeded);
+        self.pending_value = self
+            .pending_value
+            .checked_sub(amount)
+            .ok_or(EscrowError::MathOverflow)?;
+        self.open_value = self
+            .open_value
+            .checked_add(amount)
+            .ok_or(EscrowError::MathOverflow)?;
+        Ok(())
+    }
+
+    /// Takes a returned proposal's deposit `amount` off pending_value (never below zero, as
+    /// release: a return to the sponsor is never refused for the counter's sake).
+    pub fn release_pending(&mut self, amount: u64) {
+        self.pending_value = self.pending_value.saturating_sub(amount);
+    }
+
+    // ------------------------------------------------------------------- the proposal policy
+
+    /// Names `curator` (Pubkey::default(): proposals off) and the pending cap. A curator is a key
+    /// of its own: never the admin, the guardian or the arbiter (CuratorNotIndependent), and never
+    /// a revoked key (KeyRevoked), which could sign nothing in the role. Proposals already
+    /// submitted stay as they are: the new curator reviews them, the old one no longer can.
+    pub fn set_proposal_policy(&mut self, curator: Pubkey, pending_cap: u64) -> Result<()> {
+        if curator != Pubkey::default() {
+            self.require_not_revoked(&curator)?;
+            require!(
+                curator != self.admin && curator != self.guardian && curator != self.arbiter,
+                EscrowError::CuratorNotIndependent
+            );
+        }
+        self.curator = curator;
+        self.pending_cap = pending_cap;
+        Ok(())
+    }
+
+    /// Refuses `signer` unless it is the curator: none named (ProposalsDisabled), another key
+    /// (UnauthorizedCurator), or the curator's key revoked (KeyRevoked).
+    pub fn require_curator(&self, signer: &Pubkey) -> Result<()> {
+        require!(
+            self.curator != Pubkey::default(),
+            EscrowError::ProposalsDisabled
+        );
+        require!(*signer == self.curator, EscrowError::UnauthorizedCurator);
+        self.require_not_revoked(signer)
+    }
+
+    /// Whether `key` is the curator (a key is: Pubkey::default() never is).
+    pub fn is_curator(&self, key: &Pubkey) -> bool {
+        self.curator != Pubkey::default() && *key == self.curator
+    }
+
+    /// What a proposal's terms are held to on top of check_terms_policy, at the submit and again at
+    /// the approval against today's curator, since its sponsor (off the allowlist) chose them and
+    /// the program cannot read whose key a resolver is (the #852 audit's P2-1 and P3-1; the house's
+    /// own check, that the terms are exactly the ones it composes for the competition, is the
+    /// server's):
+    /// - the sponsor is not the curator (SponsorIsCurator): one signature would submit and approve;
+    /// - neither the resolver nor the compliance key is the sponsor or the curator
+    ///   (ProposalRoleNotIndependent): a sponsor as its own resolver posts what it likes, as its own
+    ///   compliance key holds every winner until the pot refunds to it, and the curator as either
+    ///   would hold a role in an escrow it approved;
+    /// - resolve_deadline - final_end is at least MIN_RESOLVE_WINDOW (ResolveWindowTooShort): past
+    ///   resolve_deadline no result can be posted and the whole pot refunds to the sponsor;
+    /// - bond_lamports is at most MAX_PROPOSAL_BOND (ProposalBondTooHigh): a bond the resolver
+    ///   cannot post is the same refund, and one no entrant can afford leaves a result unchallenged.
+    ///
+    /// The terms passed EscrowTerms::validate first, so final_end < resolve_deadline and the
+    /// subtraction cannot overflow (MathOverflow if it ever could).
+    pub fn check_proposal_terms(&self, sponsor: &Pubkey, terms: &EscrowTerms) -> Result<()> {
+        require!(!self.is_curator(sponsor), EscrowError::SponsorIsCurator);
+        for role in [&terms.resolver, &terms.compliance] {
+            require!(
+                role != sponsor && !self.is_curator(role),
+                EscrowError::ProposalRoleNotIndependent
+            );
+        }
+        let window = terms
+            .resolve_deadline
+            .checked_sub(terms.final_end)
+            .ok_or(EscrowError::MathOverflow)?;
+        require!(
+            window >= MIN_RESOLVE_WINDOW,
+            EscrowError::ResolveWindowTooShort
+        );
+        require!(
+            terms.bond_lamports <= MAX_PROPOSAL_BOND,
+            EscrowError::ProposalBondTooHigh
+        );
+        Ok(())
+    }
+
     // ------------------------------------------------------------------- the open policy
 
-    /// What open_escrow holds `terms` to on top of EscrowTerms::validate, each its own error:
-    /// the mint on the allowlist (MintNotAllowed), the sponsor too (SponsorNotAllowed), refund_to
+    /// What open_escrow (and submit_proposal and approve_proposal, for the escrow a proposal
+    /// opens) holds `terms` to on top of EscrowTerms::validate, each its own error: the mint on
+    /// the allowlist (MintNotAllowed), the sponsor too when `sponsor_allowlisted`
+    /// (SponsorNotAllowed: open_escrow passes true; a proposal passes false, since the curator's
+    /// co-signature, given after the house screened the sponsor, stands in for the sponsor
+    /// allowlist, and waives nothing else), refund_to
     /// the sponsor (RefundToNotSponsor), the arbiter Config's (ArbiterNotConfig), a compliance key
     /// (ComplianceRequired), neither the resolver nor the compliance key the address of the
     /// `escrow` being opened (RoleIsEscrow: a PDA of this program that it never signs for, so
@@ -556,16 +734,17 @@ impl Config {
     /// Config lowers it below a majority (set_limits). min_regraders is the admin's too: 1 by
     /// default (#541), so a one-regrader panel, whose one vote decides a dispute, is allowed until
     /// the admin raises the floor (set_min_regraders), with no upgrade.
-    pub fn check_open_policy(
+    pub fn check_terms_policy(
         &self,
         sponsor: &Pubkey,
         mint: &Pubkey,
         escrow: &Pubkey,
         terms: &EscrowTerms,
+        sponsor_allowlisted: bool,
     ) -> Result<()> {
         require!(self.mints.contains(mint), EscrowError::MintNotAllowed);
         require!(
-            self.sponsors.contains(sponsor),
+            !sponsor_allowlisted || self.sponsors.contains(sponsor),
             EscrowError::SponsorNotAllowed
         );
         require!(terms.refund_to == *sponsor, EscrowError::RefundToNotSponsor);

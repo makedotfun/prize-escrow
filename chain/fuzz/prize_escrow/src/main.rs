@@ -2,10 +2,18 @@
 //! 0.15.2). The world, the honest parties and every invariant are the integration tests' own
 //! (chain/programs/prize_escrow/tests/support, compiled here by `#[path]`); crucible drives the
 //! adversary's steps as typed actions, coverage-guided over the release build's sBPF edges, and
-//! the invariant test asserts after every action that the oracle found no violation.
+//! the invariant test asserts after every action that the oracle found no violation. The world is
+//! the blast-radius test's (tests/blast_radius.rs base): the escrow open, and a user sponsor's
+//! proposal submitted beside it (World::open_proposals), which the adversary's proposal moves
+//! (action_proposal, Step::Proposal), the user sponsor's own moves when the adversary holds its
+//! key (action_sponsor, Step::Sponsor: terms of its choosing, its token account's owner
+//! reassigned, fund attempts) and the honest curator's review play against. The wind-down's
+//! admin verbs and its permissionless close_receipt are the adversary's to try too
+//! (action_wind_down, Step::WindDown).
 //!
 //! The key set and panel come from the environment (BLAST_K: one of Compromise's variant names,
-//! default AllHouseKeys; BLAST_PANEL: HouseMajority, the default, or IndependentMajority; and
+//! default AllHouseKeys, UserSponsor for a malicious user sponsor; BLAST_PANEL: HouseMajority, the
+//! default, or IndependentMajority; and
 //! BLAST_BOUND, a bound to hold the adversary to instead of bound(K): 0 searches for any drain,
 //! e.g. one by the house's keys with the guardian's on a house panel, the one K bound(K) lets
 //! take the pot; the house quorum's grace reveal is refused since #749, settle applying an
@@ -35,7 +43,6 @@ use {
         Chain, Panel, Sent, World, FINAL_END,
     },
 };
-
 
 type Pubkey = anchor_lang::prelude::Pubkey;
 type Clock = anchor_lang::prelude::Clock;
@@ -164,8 +171,9 @@ impl BlastFixture {
         let path = program_so::path();
         ctx.add_program(&prize_escrow::ID, path.to_str().expect("a UTF-8 path"))
             .expect("the release build (node scripts/chain/build.ts release)");
-        let world = World::create(&mut ctx, panel(), true);
+        let mut world = World::create(&mut ctx, panel(), true);
         ctx.set_time(FINAL_END - MAX_LATENCY);
+        world.open_proposals(&mut ctx);
         let mut model = Model::new(world, compromise());
         model.bound_override = std::env::var("BLAST_BOUND").ok().map(|b| {
             b.parse()
@@ -318,6 +326,30 @@ impl BlastFixture {
 
     pub fn action_donate_lamports(&mut self) {
         self.run(Step::DonateLamports);
+    }
+
+    /// The adversary's move on the sponsor's proposal (Step::Proposal's six ops: approve or
+    /// reject as the curator, expire it as anyone, submit one of its own from the sponsor's
+    /// funding, donate a token to its vault, name its own key the curator).
+    pub fn action_proposal(&mut self, #[range(0..6)] op: u8) {
+        self.run(Step::Proposal { op });
+    }
+
+    /// The user sponsor's move (Step::Sponsor's five ops, BLAST_K=UserSponsor holding its key:
+    /// submit terms of its own, the curator co-signing whatever they are (`pick` 0 to 8: the
+    /// house's, itself or the curator as the resolver or the compliance key, a one-second resolve
+    /// window, a million-SOL bond, a resolver of its own, refund_to another key); withdraw a
+    /// proposal; send the way back to the adversary's account; reassign its associated token
+    /// account's owner; fund its proposal's escrow or the world's).
+    pub fn action_sponsor(&mut self, #[range(0..5)] op: u8, #[range(0..9)] pick: u8) {
+        self.run(Step::Sponsor { op, pick });
+    }
+
+    /// The wind-down (Step::WindDown's ops: retire, close_escrow to its refund_to or to the
+    /// adversary, close_config to the adversary, each under its best key as the admin; close
+    /// every receipt there is, its fee payer the only signer).
+    pub fn action_wind_down(&mut self, #[range(0..8)] op: u8) {
+        self.run(Step::WindDown { op });
     }
 }
 

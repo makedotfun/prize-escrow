@@ -645,6 +645,7 @@ impl S {
                 associated_token_program: associated_token::ID,
                 system_program: system_program::ID,
                 config: config_pda(),
+                destination: None,
                 event_authority: EVENT_AUTHORITY,
                 program: prize_escrow::ID,
             },
@@ -880,11 +881,23 @@ fn only_the_upgrade_authority_creates_the_config_and_only_once() {
         (config.open_value, config.stopped_secs, config.revoked.len()),
         (0, 0, 0)
     );
-    assert_eq!(config.reserved, [0; 63]);
     // The panel floor starts at the default (#541: a one-regrader panel is allowed).
     assert_eq!(
         (config.min_regraders, changed.min_regraders),
         (prize_escrow::DEFAULT_MIN_REGRADERS, 1)
+    );
+    // No curator: proposals start off, nothing pending, no room for them; not retired, no escrow
+    // counted.
+    assert_eq!(
+        (
+            config.curator,
+            config.pending_value,
+            config.pending_cap,
+            config.retired,
+            config.live_escrows,
+            config.reserved
+        ),
+        (Pubkey::default(), 0, 0, false, 0, [0; 10])
     );
     assert_eq!(
         s.svm.get_account(&config_pda()).unwrap().data.len(),

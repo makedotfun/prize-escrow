@@ -1,7 +1,7 @@
 [package]
 name = "prize_escrow_kani"
 version = "0.1.0"
-description = "Kani proofs of prize_escrow's pure functions: merkle verify, the result and commit commitments, the escrow clock and the stop escalation, the claim flow bucket, check_deposit and bonds_to_winner"
+description = "Kani proofs of prize_escrow's pure functions: merkle verify, the result and commit commitments, the escrow clock and the stop escalation, the claim flow bucket, check_deposit, bonds_to_winner and the unbonded floor, the challenge window settle and escalate share, the panel floor and the arbiter's record and clear of an alternative"
 edition = "2021"
 rust-version = "1.89"
 license = "UNLICENSED"
@@ -18,7 +18,8 @@ path = "src/lib.rs"
 
 [dependencies]
 # The program's pure functions (lib.rs, merkle.rs, state.rs, config.rs), not its entrypoint, and
-# what src/instructions/open_escrow.rs (compiled in here for its pub(crate) check_deposit) names.
+# what src/instructions/open_escrow.rs and settle.rs name (compiled in here for open_escrow's
+# pub(crate) check_deposit and settle's unbonded_floor, pay_bond and require_window_over).
 prize_escrow = { path = "../..", features = ["no-entrypoint"] }
 anchor-lang = { version = "1.2.1", features = ["init-if-needed", "event-cpi"] }
 anchor-spl = { version = "1.2.1", default-features = false, features = ["token", "associated_token", "solana-v3"] }

@@ -95,8 +95,9 @@ pub struct ResultSide {
 }
 
 /// The terms open_escrow fixes for the escrow's whole life (the competition id is its own
-/// argument, because it seeds the PDA with the sponsor).
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
+/// argument, because it seeds the PDA with the sponsor). A Proposal stores them whole (at most
+/// MAX_REGRADERS regraders: validate refuses more), so validate stays their one validator.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq, InitSpace)]
 pub struct EscrowTerms {
     /// The prize pot in mint base units, moved into the vault at open.
     pub total: u64,
@@ -113,6 +114,7 @@ pub struct EscrowTerms {
     /// that won, never here.
     pub refund_to: Pubkey,
     /// The pre-named regraders, 1 to MAX_REGRADERS distinct keys; n is their count.
+    #[max_len(MAX_REGRADERS)]
     pub regraders: Vec<Pubkey>,
     /// Attestations needed to settle a dispute: 1 <= k <= n and 2k > n.
     pub k: u8,

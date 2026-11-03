@@ -1,14 +1,21 @@
 //! The per-actor blast radius, fuzzed: for each key set K the adversary may hold (the resolver,
 //! the compliance key, one house regrader, all the house's keys, one multisig member, the
-//! guardian, the house's keys with the guardian's, and nobody) on each panel (the house holding a
-//! quorum, as owner decision #541 allows today, or independent regraders holding it), proptest
-//! draws random step sequences, runs them on the release build in LiteSVM against live honest
-//! parties, and the oracle (tests/support/model.rs) audits every transaction: the USDC moved
-//! outside the honest rubric is at most bound(K), none of it before challenge_deadline on the
-//! escrow clock (before attest_deadline under an applied alternative), and conservation, single
-//! claims, single bond payments, one terminal state and privilege hold throughout. bound(K) is the
-//! pot only for the house's keys with the guardian's on a house panel, 0 for every other K. Each sequence then drains (the honest parties alone, until the
-//! escrow is Closed and every account closed) and the end state is checked too.
+//! guardian, the house's keys with the guardian's, the curator alone, a malicious user sponsor
+//! alone, and nobody) on each panel (the house holding a quorum, as owner decision #541 allows
+//! today, or independent regraders holding it), proptest draws random step sequences, runs them
+//! on the release build in LiteSVM against live honest parties, and the oracle
+//! (tests/support/model.rs) audits every transaction: the USDC moved outside the honest rubric is
+//! at most bound(K), none of it before challenge_deadline on the escrow clock (before
+//! attest_deadline under an applied alternative), and conservation, single claims, single bond
+//! payments, one terminal state and privilege hold throughout. Beside the escrow a user sponsor
+//! (off the allowlist) has a proposal awaiting review (World::open_proposals), which leaves only
+//! into an escrow of exactly the terms it submitted or back to it, Config's counters always the
+//! open deposits; the user sponsor, when K holds it, also submits terms of its own (which the
+//! program must hold to the proposal bounds), reassigns its token account's owner and tries to
+//! fund. bound(K) is the pot only for the house's keys with the guardian's on a house panel, 0 for
+//! every other K (the curator's alone and the user sponsor's alone included). Each sequence then
+//! drains (the honest parties alone, until the escrow is Closed, the proposals out, the escrow a
+//! proposal opened refunded and every account closed) and the end state is checked too.
 //!
 //! A failing sequence is shrunk to a minimal one and printed with the oracle's trace.
 //!
@@ -31,9 +38,9 @@ mod program_so;
 mod support;
 
 use {
-    anchor_lang::AccountSerialize,
+    anchor_lang::{prelude::Pubkey, AccountSerialize},
     litesvm::LiteSVM,
-    prize_escrow::EscrowStatus,
+    prize_escrow::{ClaimReceipt, EscrowError, EscrowStatus},
     proptest::{
         collection::vec,
         prelude::*,
@@ -59,13 +66,15 @@ fn env_or<T: std::str::FromStr>(name: &str, default: T) -> T {
         .unwrap_or(default)
 }
 
-/// The world for K and the panel, just before the final phase ends.
+/// The world for K and the panel, just before the final phase ends, the sponsor's proposal
+/// submitted then (World::open_proposals) beside its open escrow.
 fn base(panel: Panel, who: Compromise) -> (LiteSVM, Model) {
     let mut svm = mainnet::svm();
     svm.add_program(prize_escrow::ID, program_so::bytes())
         .unwrap();
-    let world = World::create(&mut svm, panel, true);
+    let mut world = World::create(&mut svm, panel, true);
     svm.set_time(FINAL_END - MAX_LATENCY);
+    world.open_proposals(&mut svm);
     (svm, Model::new(world, who))
 }
 
@@ -112,6 +121,9 @@ fn step() -> impl Strategy<Value = Step> {
         6 => any::<u8>().prop_map(Step::Tick),
         6 => (any::<u8>(), any::<u8>()).prop_map(|(deadline, before)| Step::Approach { deadline, before }),
         4 => (any::<u8>(), any::<u8>()).prop_map(|(tree, by)| Step::Reveal { tree, by }),
+        4 => any::<u8>().prop_map(|op| Step::Proposal { op }),
+        4 => (any::<u8>(), any::<u8>()).prop_map(|(op, pick)| Step::Sponsor { op, pick }),
+        2 => any::<u8>().prop_map(|op| Step::WindDown { op }),
     ]
 }
 
@@ -219,6 +231,10 @@ oracle! {
     the_guardian_on_an_independent_panel: Guardian on IndependentMajority;
     the_house_and_the_guardian_on_a_house_panel: AllHouseKeysAndGuardian on HouseMajority;
     the_house_and_the_guardian_on_an_independent_panel: AllHouseKeysAndGuardian on IndependentMajority;
+    the_curator_on_a_house_panel: Curator on HouseMajority;
+    the_curator_on_an_independent_panel: Curator on IndependentMajority;
+    a_user_sponsor_on_a_house_panel: UserSponsor on HouseMajority;
+    a_user_sponsor_on_an_independent_panel: UserSponsor on IndependentMajority;
 }
 
 // ------------------------------------------------------------------- the oracle is not vacuous
@@ -358,6 +374,260 @@ fn a_house_quorum_cannot_apply_a_challenge_revealed_in_the_grace() {
     assert_eq!(m.outside_max, 0, "{}", m.report());
     m.drain(&mut svm, DRAIN)
         .unwrap_or_else(|report| panic!("{report}"));
+    assert_eq!(m.outside_max, 0, "{}", m.report());
+}
+
+/// The wind-down under the guardian's key: retire, close_escrow (to its refund_to or to the
+/// adversary's key) and close_config under the guardian's key are refused, before the result
+/// and after the escrow closed; once it closed, the adversary closes every receipt (anyone's to
+/// send), each one's rent to its claimant, and the oracle finds nothing: each winner keeps what its
+/// receipt recorded.
+#[test]
+fn the_wind_down_is_the_admins_but_any_key_closes_the_receipts() {
+    let (mut svm, mut m) = base(Panel::HouseMajority, Compromise::Guardian);
+    let admin_ops = [0u8, 1, 5, 2];
+    let refused = |m: &Model, op: u8| {
+        m.trace
+            .iter()
+            .filter(|t| {
+                t.contains(&format!(
+                    "WindDown {{ op: {op} }}: refused {}",
+                    u32::from(EscrowError::UnauthorizedAdmin)
+                ))
+            })
+            .count()
+    };
+    for op in admin_ops.into_iter().chain([3]) {
+        m.step(&mut svm, Step::WindDown { op })
+            .unwrap_or_else(|report| panic!("{report}"));
+    }
+    m.drain(&mut svm, DRAIN)
+        .unwrap_or_else(|report| panic!("{report}"));
+    let receipts: Vec<(Pubkey, Pubkey, u64, u64, u64)> = Role::all()
+        .into_iter()
+        .filter_map(|role| {
+            let receipt = m.world.receipt(&role.pubkey());
+            let state = svm.anchor::<ClaimReceipt>(&receipt)?;
+            Some((
+                role.pubkey(),
+                receipt,
+                svm.lamports(&receipt),
+                svm.lamports(&role.pubkey()),
+                state.amount_claimed,
+            ))
+        })
+        .collect();
+    assert!(!receipts.is_empty(), "the winners claimed: {}", m.report());
+    for op in admin_ops.into_iter().chain([3]) {
+        m.step(&mut svm, Step::WindDown { op })
+            .unwrap_or_else(|report| panic!("{report}"));
+    }
+    for op in admin_ops {
+        assert_eq!(refused(&m, op), 2, "op {op} refused twice: {}", m.report());
+    }
+    for (claimant, receipt, rent, was, claimed) in &receipts {
+        assert_eq!(svm.lamports(receipt), 0, "closed: {}", m.report());
+        assert_eq!(svm.lamports(claimant), was + rent, "the rent to the claimant");
+        assert_eq!(svm.tokens(&m.world.ata(claimant)), *claimed);
+    }
+    assert_eq!(m.receipts_closed.len(), receipts.len());
+    assert!(m.violations.is_empty(), "{}", m.report());
+}
+
+/// The curator alone, against the sponsor's proposal: it sends a token into the proposal vault,
+/// tries an expiry before review_deadline, a submit paid from the sponsor's funding account, its
+/// own key as the curator and an admin verb (all refused), then rejects: the deposit and the
+/// token go back to the sponsor. On a fresh world it approves instead: the escrow opens with
+/// exactly the sponsor's terms. Nothing moves outside the rubric either way, and the winners of
+/// the world's escrow are paid.
+#[test]
+fn the_curator_alone_approves_the_sponsors_terms_or_returns_the_deposit() {
+    let sponsor = Role::UserSponsor.pubkey();
+    let (mut svm, mut m) = base(Panel::HouseMajority, Compromise::Curator);
+    let p = m.world.proposal.clone().expect("the sponsor's proposal");
+    for step in [
+        Step::Proposal { op: 4 },
+        Step::Proposal { op: 2 },
+        Step::Proposal { op: 3 },
+        Step::Proposal { op: 5 },
+        Step::SetLimits,
+        Step::Proposal { op: 1 },
+    ] {
+        m.step(&mut svm, step)
+            .unwrap_or_else(|report| panic!("{report}"));
+    }
+    for label in [
+        "Proposal { op: 2 }",
+        "Proposal { op: 3 }",
+        "Proposal { op: 5 }",
+        "SetLimits",
+    ] {
+        assert!(
+            m.trace
+                .iter()
+                .any(|t| t.contains(&format!("{label}: refused"))),
+            "{label} is refused: {}",
+            m.report()
+        );
+    }
+    assert!(
+        m.trace.iter().any(|t| t.contains(&format!(
+            "Proposal {{ op: 2 }}: refused {}",
+            u32::from(EscrowError::DeadlineNotReached)
+        ))),
+        "no expiry before review_deadline: {}",
+        m.report()
+    );
+    assert!(
+        m.world.proposal_state(&svm, &sponsor, &p.cid).is_none(),
+        "rejected: {}",
+        m.report()
+    );
+    assert_eq!(
+        svm.tokens(&m.world.ata(&sponsor)),
+        TOTAL + 1,
+        "the deposit and the token back with the sponsor"
+    );
+    m.drain(&mut svm, DRAIN)
+        .unwrap_or_else(|report| panic!("{report}"));
+    assert_eq!(m.outside_max, 0, "{}", m.report());
+
+    let (mut svm, mut m) = base(Panel::IndependentMajority, Compromise::Curator);
+    m.step(&mut svm, Step::Proposal { op: 0 })
+        .unwrap_or_else(|report| panic!("{report}"));
+    let e = m
+        .world
+        .escrow_state_at(&svm, &sponsor, &p.cid)
+        .expect("the approved escrow");
+    assert_eq!(
+        (e.status, e.total, e.deposited, e.refund_to, e.sponsor),
+        (EscrowStatus::Open, TOTAL, TOTAL, sponsor, sponsor)
+    );
+    m.drain(&mut svm, DRAIN)
+        .unwrap_or_else(|report| panic!("{report}"));
+    assert_eq!(m.outside_max, 0, "{}", m.report());
+}
+
+/// A malicious user sponsor alone (the #852 audit's P2-1, P2-2 and P3-3, its probes P-A and P-B):
+/// it reassigns its associated token account's owner to a key of its own, then submits terms of
+/// its choosing, the curator co-signing whatever they are: each self-dealing one is refused by
+/// name (itself or the curator as the resolver or the compliance key, a one-second resolve window,
+/// a bond of a million SOL, refund_to another key), and one with a resolver of its own the
+/// program cannot tell from the house's pends until the curator rejects it. Its way back sent
+/// elsewhere and its fund attempts are refused, before and after its proposal's approval. The
+/// honest parties return its own proposal's deposit, and later refund the escrow the world's
+/// opened, into a token account they create for it: nothing is pinned, and nothing moves outside
+/// the rubric.
+#[test]
+fn a_user_sponsor_sets_no_self_dealing_terms_and_pins_nothing() {
+    let user = Role::UserSponsor.pubkey();
+    let (mut svm, mut m) = base(Panel::HouseMajority, Compromise::UserSponsor);
+    let p = m
+        .world
+        .proposal
+        .clone()
+        .expect("the user sponsor's proposal");
+    let ata = m.world.ata(&user);
+    let sponsor = |op, pick| Step::Sponsor { op, pick };
+    for step in [
+        sponsor(3, 0),
+        sponsor(0, 1),
+        sponsor(0, 2),
+        sponsor(0, 3),
+        sponsor(0, 4),
+        sponsor(0, 5),
+        sponsor(0, 6),
+        sponsor(0, 8),
+        sponsor(0, 7),
+        sponsor(2, 1),
+        sponsor(4, 0),
+        sponsor(4, 1),
+        Step::React,
+        Step::Wait(MAX_LATENCY as u32),
+        Step::Wait(MAX_LATENCY as u32),
+        Step::React,
+        sponsor(4, 0),
+        sponsor(2, 2),
+    ] {
+        m.step(&mut svm, step)
+            .unwrap_or_else(|report| panic!("{report}"));
+    }
+    let refused = |label: &str, code: u32| {
+        assert!(
+            m.trace
+                .iter()
+                .any(|t| t.contains(&format!("{label}: refused {code}"))),
+            "{label} is refused with {code}: {}",
+            m.report()
+        );
+    };
+    let not_independent = u32::from(EscrowError::ProposalRoleNotIndependent);
+    for pick in 1..=4 {
+        refused(
+            &format!("Sponsor {{ op: 0, pick: {pick} }}"),
+            not_independent,
+        );
+    }
+    refused(
+        "Sponsor { op: 0, pick: 5 }",
+        EscrowError::ResolveWindowTooShort.into(),
+    );
+    refused(
+        "Sponsor { op: 0, pick: 6 }",
+        EscrowError::ProposalBondTooHigh.into(),
+    );
+    refused(
+        "Sponsor { op: 0, pick: 8 }",
+        EscrowError::RefundToNotSponsor.into(),
+    );
+    let not_owned = anchor_lang::error::ErrorCode::ConstraintTokenOwner as u32;
+    refused("Sponsor { op: 2, pick: 1 }", not_owned);
+    refused("Sponsor { op: 2, pick: 2 }", not_owned);
+    // Before the approval its proposal's escrow does not exist; after it, it adds nothing.
+    refused(
+        "Sponsor { op: 4, pick: 0 }",
+        anchor_lang::error::ErrorCode::AccountNotInitialized.into(),
+    );
+    refused(
+        "Sponsor { op: 4, pick: 0 }",
+        EscrowError::SponsorNotAllowed.into(),
+    );
+    refused(
+        "Sponsor { op: 4, pick: 1 }",
+        EscrowError::UnauthorizedSponsor.into(),
+    );
+    for done in [
+        "Sponsor { op: 3, pick: 0 }: ok",
+        "Sponsor { op: 0, pick: 7 }: ok",
+        "curator rejects the sponsor's own terms: ok",
+        "curator approves: ok",
+    ] {
+        assert!(
+            m.trace.iter().any(|t| t.contains(done)),
+            "{done}: {}",
+            m.report()
+        );
+    }
+    let refuge = *m
+        .user_refuges
+        .first()
+        .expect("a token account for the sponsor");
+    assert_eq!(
+        (svm.tokens(&refuge), svm.tokens(&ata)),
+        (TOTAL, 0),
+        "its own proposal's deposit is back in the account the curator named: {}",
+        m.report()
+    );
+    m.drain(&mut svm, DRAIN)
+        .unwrap_or_else(|report| panic!("{report}"));
+    let e = m
+        .world
+        .escrow_state_at(&svm, &user, &p.cid)
+        .expect("the escrow the world's proposal opened");
+    assert_eq!(e.status, EscrowStatus::Closed, "{}", m.report());
+    assert_eq!(svm.tokens(&refuge), 2 * TOTAL, "refunded to it too");
+    let config = m.world.config(&svm);
+    assert_eq!((config.open_value, config.pending_value), (0, 0));
     assert_eq!(m.outside_max, 0, "{}", m.report());
 }
 

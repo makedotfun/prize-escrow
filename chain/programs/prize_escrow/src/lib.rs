@@ -24,6 +24,11 @@
 //! only escalate: stop, freeze one escrow, hand an undecided escrow to the arbiter, revoke a key.
 //! Every deadline is read on a clock that stands still while the escrow is stopped or frozen. No
 //! breaker stops a program upgrade.
+//!
+//! The proposals (proposal.rs): a sponsor who is not on the allowlist deposits its prize with its
+//! terms and schedule fixed, co-signed by the Config's curator (a key of its own, off by default),
+//! and the curator either approves it into the escrow those terms open, or the deposit returns to
+//! the sponsor (withdrawn, rejected with the sha256 of a reason, or expired at review_deadline).
 
 pub mod config;
 pub mod constants;
@@ -31,6 +36,7 @@ pub mod error;
 pub mod events;
 pub mod instructions;
 pub mod merkle;
+pub mod proposal;
 pub mod state;
 
 use anchor_lang::prelude::*;
@@ -40,6 +46,7 @@ pub use constants::*;
 pub use error::*;
 pub use events::*;
 pub use instructions::*;
+pub use proposal::*;
 pub use state::*;
 
 declare_id!("sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd");
@@ -55,7 +62,7 @@ solana_security_txt::security_txt! {
     project_url: "https://make.fun",
     contacts: "email:security@make.fun",
     policy: "Report vulnerabilities privately to security@make.fun, never in a public issue or post.",
-    source_code: "https://github.com/ezolabs/prize-escrow",
+    source_code: "https://github.com/makedotfun/prize-escrow",
     source_revision: env!("PRIZE_ESCROW_SOURCE_REVISION")
 }
 
@@ -111,6 +118,16 @@ pub mod prize_escrow {
         house: bool,
     ) -> Result<()> {
         instructions::config_admin::handle_set_allowed(ctx, list, key, allowed, house)
+    }
+
+    /// The admin names the curator (Pubkey::default(): proposals off) and the pending cap. The
+    /// curator is never revoked, nor the admin, the guardian or the arbiter.
+    pub fn set_proposal_policy(
+        ctx: Context<AdminConfig>,
+        curator: Pubkey,
+        pending_cap: u64,
+    ) -> Result<()> {
+        instructions::config_admin::handle_set_proposal_policy(ctx, curator, pending_cap)
     }
 
     // ------------------------------------------------------------------ the breakers
@@ -176,9 +193,54 @@ pub mod prize_escrow {
         instructions::open_escrow::handle_open_escrow(ctx, competition_id, terms)
     }
 
-    /// The sponsor adds `amount` to the vault while the escrow is Open, within the caps.
+    /// The sponsor adds `amount` to the vault while the escrow is Open, within the caps, as long as
+    /// it is on the sponsor allowlist (a sponsor whose escrow a proposal opened adds nothing).
     pub fn fund(ctx: Context<Fund>, amount: u64) -> Result<()> {
         instructions::fund::handle_fund(ctx, amount)
+    }
+
+    // ------------------------------------------------------------------ the proposals
+
+    /// A sponsor, co-signed by the Config's curator, deposits `terms.total` into the proposal
+    /// vault at the PDA ["proposal", sponsor, competition_id] for review until `review_deadline`
+    /// (now < review_deadline <= opens_at < entries_deadline, at most MAX_REVIEW_WINDOW away),
+    /// held to EscrowTerms::validate and the open policy (the sponsor allowlist waived), the
+    /// proposal's own bounds (the sponsor not the curator, neither the resolver nor the compliance
+    /// key the sponsor or the curator, a resolve window of at least MIN_RESOLVE_WINDOW, a bond of
+    /// at most MAX_PROPOSAL_BOND), the per-escrow cap, the pending cap and the global cap. No
+    /// escrow may exist at the id.
+    pub fn submit_proposal(
+        ctx: Context<SubmitProposal>,
+        competition_id: [u8; 16],
+        terms: EscrowTerms,
+        opens_at: i64,
+        review_deadline: i64,
+    ) -> Result<()> {
+        instructions::submit_proposal::handle_submit_proposal(
+            ctx,
+            competition_id,
+            terms,
+            opens_at,
+            review_deadline,
+        )
+    }
+
+    /// The curator, by review_deadline, opens the proposal's escrow with its stored terms (no
+    /// arguments: nothing can change) through open_escrow's own init, moves the deposit into the
+    /// escrow vault (any extra tokens swept after it), and closes the proposal and its vault, their
+    /// rent to the sponsor. The terms are held to today's Config again, the escrow to today's
+    /// per-escrow cap.
+    pub fn approve_proposal(ctx: Context<ApproveProposal>) -> Result<()> {
+        instructions::approve_proposal::handle_approve_proposal(ctx)
+    }
+
+    /// The one way back: the whole proposal vault returns to a token account the sponsor owns
+    /// (its associated one, or the optional `destination`) and the proposal closes, signed by the
+    /// sponsor (Withdrawn, no reason), the curator (Rejected, the reason's sha256) or, after
+    /// review_deadline with no reason, anyone (Expired). Refused while a PayoutStop holds, and for
+    /// a revoked sponsor (SponsorRevoked: held).
+    pub fn close_proposal(ctx: Context<CloseProposal>, reason_sha256: [u8; 32]) -> Result<()> {
+        instructions::close_proposal::handle_close_proposal(ctx, reason_sha256)
     }
 
     /// The resolver fixes the entries root of at least one entry, once, before entries_deadline,
@@ -303,7 +365,8 @@ pub mod prize_escrow {
         instructions::release_hold::handle_release_hold(ctx, claimant)
     }
 
-    /// Permissionless: sweeps the vault to refund_to and closes it, leaving the escrow Closed and
+    /// Permissionless: sweeps the vault to a token account refund_to owns (its associated one, or
+    /// the optional `destination`) and closes it, leaving the escrow Closed and
     /// the resolver's bond (if still held) returned; challengers' bonds still held wait for
     /// close_challenge. Allowed when Claimable past claim_deadline (whatever hard_deadline says),
     /// Open past resolve_deadline, or any other status past hard_deadline, except a Disputed
@@ -312,7 +375,8 @@ pub mod prize_escrow {
         instructions::refund::handle_refund(ctx)
     }
 
-    /// The claimant closes its receipt after the escrow is Closed and takes the rent back.
+    /// Permissionless: closes a claimant's receipt once its escrow is Closed, its rent back to the
+    /// claimant.
     pub fn close_receipt(ctx: Context<CloseReceipt>) -> Result<()> {
         instructions::close_receipt::handle_close_receipt(ctx)
     }
@@ -333,5 +397,23 @@ pub mod prize_escrow {
     /// to the regrader.
     pub fn close_attestation(ctx: Context<CloseAttestation>) -> Result<()> {
         instructions::close_attestation::handle_close_attestation(ctx)
+    }
+
+    /// Admin: retires the Config for good. Intake (open_escrow, fund, submit_proposal,
+    /// approve_proposal) refuses from here on; every payout and close stays open.
+    pub fn retire(ctx: Context<Retire>) -> Result<()> {
+        instructions::wind_down::handle_retire(ctx)
+    }
+
+    /// Admin, once the Config is retired: closes a Closed escrow with no bond left in it (its
+    /// receipts, challenges, commits and attestations closed first), every lamport to refund_to.
+    pub fn close_escrow(ctx: Context<CloseEscrow>) -> Result<()> {
+        instructions::wind_down::handle_close_escrow(ctx)
+    }
+
+    /// Admin and upgrade authority, once the Config is retired with no value or escrow left under
+    /// it: closes the Config. initialize_config may then create a fresh one.
+    pub fn close_config(ctx: Context<CloseConfig>) -> Result<()> {
+        instructions::wind_down::handle_close_config(ctx)
     }
 }

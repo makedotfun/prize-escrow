@@ -790,6 +790,7 @@ impl Lc {
                 associated_token_program: associated_token::ID,
                 system_program: system_program::ID,
                 config: config_pda(),
+                destination: None,
                 event_authority: EVENT_AUTHORITY,
                 program: prize_escrow::ID,
             },

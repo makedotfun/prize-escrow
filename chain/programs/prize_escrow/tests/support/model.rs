@@ -31,7 +31,25 @@
 //! - one terminal state: the status only moves along the lifecycle's edges, Closed is final, and
 //!   the result in force never changes once Claimable;
 //! - privilege: no instruction that needs a role the adversary does not hold succeeds for it, and
-//!   the guardian only ever escalates the stop.
+//!   the guardian only ever escalates the stop;
+//! - the user sponsor's proposal, when the world has one (World::open_proposals: a sponsor off the
+//!   allowlist; the curator's key is among the house's, and `Compromise::Curator` holds it alone):
+//!   its deposit is conserved, it leaves only approved, into an escrow holding exactly the
+//!   sponsor's terms, or returned to the sponsor, an approval lands by review_deadline and an
+//!   expiry only after it, the escrow an approval opened is refunded to the sponsor once due, and
+//!   Config's open_value and pending_value are always the open deposits. The honest curator
+//!   approves a day into the review; the crank returns the proposal once review_deadline has
+//!   passed, and refunds its escrow once due.
+//! - the user sponsor's own moves (`Compromise::UserSponsor` holds its key alone; Step::Sponsor):
+//!   a second proposal (USER_CID) on terms it chose, which the curator co-signs whatever they are
+//!   (its co-signature screens the sponsor, not the terms: the house's own check of the terms is
+//!   the server's) and rejects at its first look, since it approves only terms the house composed;
+//!   so the program alone holds the terms, and no proposal it accepts names the sponsor or the
+//!   curator as its resolver or compliance key, a resolve window under MIN_RESOLVE_WINDOW or a
+//!   bond over MAX_PROPOSAL_BOND. Its associated token account's owner reassigned away (the #852
+//!   audit's P2-2), the honest parties return what is its to a token account they create for it
+//!   (close_proposal's and refund's `destination`), so nothing it does pins pending_value or
+//!   open_value; and it never funds an escrow once its proposal opened it (the #852 audit's P3-3).
 //!
 //! The bound: 0 for every K except the house's keys with the guardian's (or the guardian asleep)
 //! on a panel the house holds a quorum of (owner decision #541 allows it today): they vote a false
@@ -45,15 +63,24 @@
 //! (`a_house_quorum_cannot_apply_a_challenge_revealed_in_the_grace` in tests/blast_radius.rs); and a
 //! false posted result whose quorum the house records in the same second is still escalated
 //! inside the challenge window, since escalate refuses a recorded quorum only once settle may
-//! apply it (`a_house_quorum_recorded_before_the_guardian_looks_is_still_escalated`).
+//! apply it (`a_house_quorum_recorded_before_the_guardian_looks_is_still_escalated`). The curator
+//! alone holds no role in an open escrow and moves nothing of a proposal but into the escrow its
+//! sponsor's terms open, or back to the sponsor: its bound is 0, and the winners are paid. The
+//! user sponsor alone holds no role in any escrow but its own escrow's refund_to: whatever terms
+//! it submits, whatever it does to its own token accounts and whatever it tries to fund, its bound
+//! against everyone else's funds is 0, and the winners are paid.
 
 use {
     super::*,
     prize_escrow::{
-        ArbiterResolved, ChallengeClosed, ChallengeCommitted, CommitClosed, EscrowStatus, Refunded,
-        ResultPosted, Settled,
+        ArbiterResolved, ChallengeClosed, ChallengeCommitted, CommitClosed, EscrowStatus,
+        ProposalApproved, ProposalCloseKind, ProposalClosed, ProposalSubmitted, ReceiptClosed,
+        Refunded, ResultPosted, Settled, MAX_PROPOSAL_BOND, MIN_RESOLVE_WINDOW,
     },
 };
+
+/// The rejection reason the curator names (any non-zero sha256).
+const REASON: [u8; 32] = [0x4e; 32];
 
 /// The longest wall time between two honest reactions: well inside every window (the shortest,
 /// the attest window, is 48 h).
@@ -76,10 +103,20 @@ pub enum Compromise {
     Guardian,
     /// The house's keys and the guardian's (or a guardian asleep): the case the guardian exists for.
     AllHouseKeysAndGuardian,
+    /// The Config's curator alone: it co-signs submits and approves or rejects proposals, and
+    /// can do nothing else. Its proposal moves (Step::Proposal) run against the sponsor's
+    /// proposal open_proposals submitted, and the oracle holds it to approving the terms as the
+    /// sponsor submitted them or returning the deposit to the sponsor.
+    Curator,
+    /// A malicious user sponsor (Role::UserSponsor: off the allowlist, the sponsor of the
+    /// world's proposal) alone: it submits a proposal on terms of its choosing, withdraws, sends
+    /// the way back elsewhere, reassigns its associated token account's owner and tries to fund
+    /// (Step::Sponsor), and holds no other role.
+    UserSponsor,
 }
 
 impl Compromise {
-    pub const ALL: [Compromise; 8] = [
+    pub const ALL: [Compromise; 10] = [
         Compromise::Nobody,
         Compromise::Resolver,
         Compromise::Compliance,
@@ -88,12 +125,15 @@ impl Compromise {
         Compromise::MultisigMember,
         Compromise::Guardian,
         Compromise::AllHouseKeysAndGuardian,
+        Compromise::Curator,
+        Compromise::UserSponsor,
     ];
 
-    /// The roles whose keys the adversary holds.
+    /// The roles whose keys the adversary holds. The curator's key is the server's (owner
+    /// decision 1's default), so the house's keys include it.
     pub fn roles(self, panel: Panel) -> Vec<Role> {
         let house = || {
-            let mut keys = vec![Role::Resolver, Role::Compliance];
+            let mut keys = vec![Role::Resolver, Role::Compliance, Role::Curator];
             keys.extend((0..SEATS).filter(|s| panel.house(*s)).map(Role::Regrader));
             keys
         };
@@ -110,6 +150,8 @@ impl Compromise {
                 keys.push(Role::Guardian);
                 keys
             }
+            Compromise::Curator => vec![Role::Curator],
+            Compromise::UserSponsor => vec![Role::UserSponsor],
         }
     }
 
@@ -124,9 +166,16 @@ impl Compromise {
     }
 
     /// Whether the honest winners must end with their whole prizes (nobody who could grief them
-    /// is compromised).
+    /// is compromised: neither the curator nor the user sponsor holds a role in the world's
+    /// escrow).
     pub fn winners_paid(self) -> bool {
-        matches!(self, Compromise::Nobody | Compromise::MultisigMember)
+        matches!(
+            self,
+            Compromise::Nobody
+                | Compromise::MultisigMember
+                | Compromise::Curator
+                | Compromise::UserSponsor
+        )
     }
 }
 
@@ -229,6 +278,39 @@ pub enum Step {
     Cash {
         tree: u8,
     },
+    /// A move on the sponsor's proposal (World::open_proposals; nothing without one), `op` of:
+    /// approve it as the curator, reject it as the curator with a reason, close it as anyone
+    /// (an expiry), submit one more spending the sponsor's funding account under the adversary's
+    /// own key as sponsor, send a token into its vault, name the adversary's own key the curator.
+    Proposal {
+        op: u8,
+    },
+    /// A move of the user sponsor's (Role::UserSponsor, signed by its key where the adversary
+    /// holds it, an impersonation where not; nothing without the world's proposal), `op` of:
+    /// - submit a proposal at USER_CID from its funding account, the curator co-signing, on the
+    ///   house's terms (`pick` 0) or with one changed: the sponsor as the resolver (1) or the
+    ///   compliance key (2), the curator as either (3, 4), a one-second resolve window (5), a
+    ///   bond of a million SOL (6), a resolver of the adversary's own the program cannot tell
+    ///   from the house's (7), refund_to the adversary's (8);
+    /// - withdraw the world's proposal (`pick` even) or USER_CID's (odd);
+    /// - send the way back to a token account the adversary owns instead: withdraw a proposal as
+    ///   above, or refund the escrow the world's proposal opened (`pick` / 2 odd);
+    /// - reassign its associated token account's owner to the adversary's key (created first when
+    ///   absent);
+    /// - fund the escrow its proposal opened (`pick` even) or the world's escrow (odd) from its
+    ///   funding account.
+    Sponsor {
+        op: u8,
+        pick: u8,
+    },
+    /// A wind-down move, `op` of: retire, close_escrow (its lamports to its refund_to, or to the
+    /// adversary's own key), close_config (to the adversary's own key), each with the
+    /// adversary's best key as the admin (the admin's alone: no compromise holds it); or
+    /// close_receipt of every claimant's receipt, anyone's to send once the escrow is Closed
+    /// (its rent to the claimant, never the sender).
+    WindDown {
+        op: u8,
+    },
 }
 
 /// What must hold for an adversary's instruction to succeed.
@@ -237,7 +319,12 @@ enum Needs {
     Nothing,
     Role(Role),
     Admin,
+    /// Nothing the adversary may hold lets it: the program refuses it to every key.
+    Never,
 }
+
+/// A bond no one posts (Step::Sponsor's pick 6, the #852 audit's probe P-B).
+const MILLION_SOL: u64 = 1_000_000 * SOL;
 
 /// The escrow as one transaction found it.
 #[derive(Clone, Copy, Debug)]
@@ -280,6 +367,26 @@ pub struct Model {
     pub last_react: i64,
     /// A bound to hold the adversary to instead of bound(K) (0: search for any drain at all).
     pub bound_override: Option<u64>,
+    /// The user sponsor's proposals (World::open_proposals', and its own at USER_CID): the tokens
+    /// the adversary sent into the world's proposal vault, what every submit deposited
+    /// (ProposalSubmitted, the world's proposal's at open_proposals included), what went back to
+    /// the sponsor (ProposalClosed, and the Refunded of the escrow the world's proposal opened),
+    /// and what approve_proposal swept into its escrow's vault beyond the deposit
+    /// (ProposalApproved).
+    pub proposal_donated: u64,
+    pub proposal_deposited: u64,
+    pub proposal_returned: u64,
+    pub proposal_swept: u64,
+    /// Whether the world's proposal was returned (a ProposalClosed of its PDA).
+    pub proposal_closed: bool,
+    /// The user sponsor's proposal at USER_CID as last submitted (Step::Sponsor).
+    pub user_proposal: Option<ProposalSetup>,
+    /// The token accounts of the user sponsor's besides its associated one that the honest
+    /// parties created once it reassigned that one's owner, oldest first (user_destination).
+    pub user_refuges: Vec<Pubkey>,
+    /// The world's escrow's receipts close_receipt closed (ReceiptClosed), each claimant with the
+    /// amount_claimed its receipt recorded: the tokens stay with the claimant.
+    pub receipts_closed: Vec<(Pubkey, u64)>,
     /// Each role with its associated token account of the mint and its ClaimReceipt PDA.
     accounts: Vec<(Role, Pubkey, Pubkey)>,
 }
@@ -292,6 +399,7 @@ impl Model {
             .into_iter()
             .map(|r| (r, world.ata(&r.pubkey()), world.receipt(&r.pubkey())))
             .collect();
+        let proposal_deposited = world.proposal.as_ref().map_or(0, |p| p.terms.total);
         Model {
             accounts,
             held: who.roles(world.panel),
@@ -311,6 +419,14 @@ impl Model {
             trace: Vec::new(),
             last_react: i64::MIN / 2,
             bound_override: None,
+            proposal_donated: 0,
+            proposal_deposited,
+            proposal_returned: 0,
+            proposal_swept: 0,
+            proposal_closed: false,
+            user_proposal: None,
+            user_refuges: Vec::new(),
+            receipts_closed: Vec::new(),
         }
     }
 
@@ -364,6 +480,7 @@ impl Model {
     fn record(&mut self, c: &mut impl Chain, before: Seen, what: &str, sent: &Sent) {
         if sent.ok {
             self.tally(sent);
+            self.audit_proposal_events(c, sent, what);
         }
         self.trace.push(format!(
             "t={} {what}: {}",
@@ -391,8 +508,15 @@ impl Model {
         for e in sent.events::<ArbiterResolved>() {
             self.bonds_out += e.resolver_paid + e.challenger_paid;
         }
+        let proposal_escrow = self.proposal_escrow();
         for e in sent.events::<Refunded>() {
-            self.bonds_out += e.resolver_paid;
+            if Some(e.escrow) == proposal_escrow {
+                // The escrow the world's proposal opened: its bonds are none of the world's
+                // escrow's, and its vault goes back to the user sponsor.
+                self.proposal_returned += e.amount;
+            } else {
+                self.bonds_out += e.resolver_paid;
+            }
         }
         for e in sent.events::<ChallengeClosed>() {
             self.bonds_out += e.bond_returned;
@@ -400,6 +524,50 @@ impl Model {
         for e in sent.events::<CommitClosed>() {
             self.bonds_out += e.bond_returned;
         }
+        let escrow = self.world.escrow();
+        for e in sent.events::<ReceiptClosed>() {
+            if e.escrow == escrow {
+                self.receipts_closed.push((e.claimant, e.amount_claimed));
+            }
+        }
+        let world_proposal = self.world_proposal();
+        for e in sent.events::<ProposalClosed>() {
+            self.proposal_returned += e.amount;
+            self.proposal_closed |= Some(e.proposal) == world_proposal;
+        }
+        for e in sent.events::<ProposalApproved>() {
+            self.proposal_swept += e.swept;
+        }
+        for e in sent.events::<ProposalSubmitted>() {
+            self.proposal_deposited += e.total;
+        }
+    }
+
+    /// The world's proposal PDA (the user sponsor's, at PROPOSAL_CID), when it has one.
+    fn world_proposal(&self) -> Option<Pubkey> {
+        self.world
+            .proposal
+            .as_ref()
+            .map(|p| self.world.proposal_at(&p.sponsor, &p.cid))
+    }
+
+    /// The escrow the world's proposal opens on approval, when it has one.
+    fn proposal_escrow(&self) -> Option<Pubkey> {
+        self.world
+            .proposal
+            .as_ref()
+            .map(|p| self.world.escrow_at(&p.sponsor, &p.cid))
+    }
+
+    /// The roles whose associated token accounts hold what the rubric sends them besides prizes:
+    /// the sponsor's refund, the user sponsor's returns and refunds. They claim nothing.
+    fn is_sponsor(role: Role) -> bool {
+        matches!(role, Role::Sponsor | Role::UserSponsor)
+    }
+
+    /// What the user sponsor's token accounts besides its associated one hold.
+    fn refuged(&self, c: &impl Chain) -> u64 {
+        self.user_refuges.iter().map(|r| c.tokens(r)).sum()
     }
 
     fn seen(&self, c: &impl Chain) -> Seen {
@@ -421,12 +589,12 @@ impl Model {
     }
 
     /// What the adversary's accounts (and every account but the honest winners', up to their
-    /// prizes, and the sponsor's) hold of the mint, less what the adversary donated.
+    /// prizes, and the sponsors') hold of the mint, less what the adversary donated.
     pub fn outside(&self, c: &impl Chain) -> u64 {
         let gross: u64 = self
             .accounts
             .iter()
-            .filter(|(r, _, _)| *r != Role::Sponsor)
+            .filter(|(r, _, _)| !Self::is_sponsor(*r))
             .map(|(r, ata, _)| {
                 let held = c.tokens(ata);
                 match *r {
@@ -484,23 +652,42 @@ impl Model {
             .map(|(r, ata, receipt)| (*r, c.tokens(ata), *receipt))
             .collect();
         let vault = c.tokens(&w.vault());
-        let in_atas: u64 = atas.iter().map(|(_, b, _)| b).sum();
-        let tracked = vault + in_atas + c.tokens(&w.funding) + c.tokens(&w.attacker_funding);
-        if tracked != SPONSOR_FUNDS + ATTACKER_FUNDS {
+        // What went back to the user sponsor may sit in a token account of its besides its
+        // associated one (user_destination).
+        let in_atas: u64 = atas.iter().map(|(_, b, _)| b).sum::<u64>() + self.refuged(c);
+        // The user sponsor's proposals hold their deposits in their own vaults, then the world's
+        // in its escrow's.
+        let proposals: u64 = w.proposal.as_ref().map_or(0, |p| {
+            [p.cid, USER_CID]
+                .iter()
+                .map(|cid| {
+                    c.tokens(&w.proposal_vault_at(&p.sponsor, cid))
+                        + c.tokens(&w.escrow_vault_at(&p.sponsor, cid))
+                })
+                .sum()
+        });
+        let tracked = vault
+            + in_atas
+            + c.tokens(&w.funding)
+            + c.tokens(&w.attacker_funding)
+            + c.tokens(&w.user_funding)
+            + proposals;
+        let supply = SPONSOR_FUNDS + ATTACKER_FUNDS + USER_FUNDS;
+        if tracked != supply {
             self.violation(format!(
-                "{what}: the mint's accounts the oracle knows hold {tracked}, not the supply {}",
-                SPONSOR_FUNDS + ATTACKER_FUNDS
+                "{what}: the mint's accounts the oracle knows hold {tracked}, not the supply {supply}"
             ));
         }
-        if vault + in_atas != escrow.deposited + self.donated_tokens {
+        if vault + in_atas != escrow.deposited + self.donated_tokens + self.proposal_returned {
             self.violation(format!(
-                "{what}: vault {vault} + claimed and refunded {in_atas} != deposited {} + donated {}",
-                escrow.deposited, self.donated_tokens
+                "{what}: vault {vault} + claimed and refunded {in_atas} != deposited {} + donated {} + the proposals' return {}",
+                escrow.deposited, self.donated_tokens, self.proposal_returned
             ));
         }
+        self.audit_proposal(c, &escrow, proposals, what);
         let claimed: u64 = atas
             .iter()
-            .filter(|(r, _, _)| *r != Role::Sponsor)
+            .filter(|(r, _, _)| !Self::is_sponsor(*r))
             .map(|(_, b, _)| b)
             .sum();
         if claimed != escrow.total_claimed {
@@ -510,11 +697,23 @@ impl Model {
             ));
         }
 
-        // No leaf claimed twice: each claimant holds what its one receipt records, at most its
-        // leaf, and the leaf is one of the root in force.
-        for (role, balance, receipt) in atas.iter().filter(|(r, _, _)| *r != Role::Sponsor) {
+        // No leaf claimed twice: each claimant holds what its one receipt records (or recorded
+        // when close_receipt closed it, only ever on a Closed escrow), at most its leaf, and the
+        // leaf is one of the root in force.
+        if !self.receipts_closed.is_empty() && escrow.status != EscrowStatus::Closed {
+            self.violation(format!(
+                "{what}: a receipt closed while the escrow is {:?}",
+                escrow.status
+            ));
+        }
+        for (role, balance, receipt) in atas.iter().filter(|(r, _, _)| !Self::is_sponsor(*r)) {
             let receipt = c.anchor::<ClaimReceipt>(receipt);
-            let recorded = receipt.as_ref().map_or(0, |r| r.amount_claimed);
+            let closed = self
+                .receipts_closed
+                .iter()
+                .find(|(claimant, _)| *claimant == role.pubkey())
+                .map_or(0, |(_, amount)| *amount);
+            let recorded = receipt.as_ref().map_or(closed, |r| r.amount_claimed);
             if *balance != recorded {
                 self.violation(format!(
                     "{what}: {role:?} holds {balance}, its receipt records {recorded}"
@@ -577,6 +776,511 @@ impl Model {
         }
     }
 
+    /// The proposals' invariants and the caps' counters, after one transaction (`proposals`: what
+    /// the user sponsor's proposal vaults and the escrow vaults they open hold):
+    /// - the deposits are conserved: those vaults + what went back to the sponsor == every
+    ///   proposal's deposit + what the adversary sent into the world's proposal vault;
+    /// - one way out: the world's proposal is pending (its account, as submitted), approved (its
+    ///   escrow, no account) or returned to the sponsor (neither), and never two of them;
+    /// - fixed terms: the escrow an approval opened holds exactly the sponsor's terms, sponsor,
+    ///   mint and competition id, its deposit counted, Open with the deposit and the sweep in its
+    ///   vault until its refund closes it; the user sponsor's own proposal (USER_CID, on terms the
+    ///   house did not compose) never opens one;
+    /// - the counters: Config.open_value is the open escrows' deposits (the world's until its
+    ///   refund, the proposal's once approved and until its own), Config.pending_value the pending
+    ///   proposals'.
+    fn audit_proposal(&mut self, c: &impl Chain, escrow: &Escrow, proposals: u64, what: &str) {
+        let w = self.world.clone();
+        let config = w.config(c);
+        let main_open = if escrow.status == EscrowStatus::Closed {
+            0
+        } else {
+            escrow.deposited
+        };
+        // live_escrows counts the escrows open_escrow and approve_proposal opened and
+        // close_escrow (the admin's alone, after retire) has not closed: the world's, and the one
+        // the world's proposal opens once approved. No key the adversary may hold retires it.
+        let opened_live = w
+            .proposal
+            .as_ref()
+            .is_some_and(|p| w.escrow_state_at(c, &p.sponsor, &p.cid).is_some());
+        let live = 1 + u32::from(opened_live);
+        if config.live_escrows != live || config.retired {
+            self.violation(format!(
+                "{what}: live_escrows {} (retired {}), not the {live} escrows open and not retired",
+                config.live_escrows, config.retired
+            ));
+        }
+        let Some(p) = w.proposal.as_ref() else {
+            if (config.open_value, config.pending_value) != (main_open, 0) {
+                self.violation(format!(
+                    "{what}: open_value {} and pending_value {} are not the open deposits {main_open} and 0",
+                    config.open_value, config.pending_value
+                ));
+            }
+            return;
+        };
+        let sponsor = p.sponsor;
+        let pending = w.proposal_state(c, &sponsor, &p.cid);
+        let opened = w.escrow_state_at(c, &sponsor, &p.cid);
+        let own = w.proposal_state(c, &sponsor, &USER_CID);
+        if w.escrow_state_at(c, &sponsor, &USER_CID).is_some() {
+            self.violation(format!(
+                "{what}: the user sponsor's own proposal opened an escrow, on terms the house did not compose"
+            ));
+        }
+        let total = p.terms.total;
+        if proposals + self.proposal_returned != self.proposal_deposited + self.proposal_donated {
+            self.violation(format!(
+                "{what}: the proposals' vaults and their escrows' {proposals} + returned {} != their deposits {} + donated {}",
+                self.proposal_returned, self.proposal_deposited, self.proposal_donated
+            ));
+        }
+        let returned = self.proposal_closed;
+        match (&pending, &opened, returned) {
+            (Some(_), None, false) | (None, Some(_), false) | (None, None, true) => {}
+            _ => self.violation(format!(
+                "{what}: the proposal is {} pending, {} approved, {} returned",
+                pending.is_some(),
+                opened.is_some(),
+                returned
+            )),
+        }
+        if let Some(stored) = &pending {
+            if (
+                &stored.terms,
+                stored.opens_at,
+                stored.review_deadline,
+                stored.deposited,
+            ) != (&p.terms, p.opens_at, p.review_deadline, total)
+            {
+                self.violation(format!(
+                    "{what}: the stored proposal is not the one submitted"
+                ));
+            }
+        }
+        if let Some(e) = &opened {
+            let terms = EscrowTerms {
+                total: e.total,
+                rules_sha256: e.rules_sha256,
+                resolver: e.resolver,
+                compliance: e.compliance,
+                arbiter: e.arbiter,
+                refund_to: e.refund_to,
+                regraders: e.regraders[..usize::from(e.n)].to_vec(),
+                k: e.k,
+                bond_lamports: e.bond_lamports,
+                entries_deadline: e.entries_deadline,
+                final_end: e.final_end,
+                resolve_deadline: e.resolve_deadline,
+                challenge_window: e.challenge_window,
+                attest_window: e.attest_window,
+                hold_window: e.hold_window,
+                claim_window: e.claim_window,
+                hard_deadline: e.hard_deadline,
+            };
+            let refunded = e.status == EscrowStatus::Closed;
+            if terms != p.terms
+                || (e.sponsor, e.mint, e.competition_id, e.deposited)
+                    != (sponsor, w.mint, p.cid, total)
+                || !matches!(e.status, EscrowStatus::Open | EscrowStatus::Closed)
+            {
+                self.violation(format!(
+                    "{what}: the approved escrow is not the sponsor's terms: {e:?}"
+                ));
+            }
+            let in_vault = c.tokens(&w.escrow_vault_at(&sponsor, &p.cid));
+            let want = if refunded {
+                0
+            } else {
+                total + self.proposal_swept
+            };
+            if in_vault != want {
+                self.violation(format!(
+                    "{what}: the approved escrow's vault holds {in_vault}, not {want} (the deposit {total} + swept {}, until its refund)",
+                    self.proposal_swept
+                ));
+            }
+        }
+        let want = (
+            main_open
+                + opened
+                    .as_ref()
+                    .filter(|e| e.status != EscrowStatus::Closed)
+                    .map_or(0, |e| e.deposited),
+            pending.as_ref().map_or(0, |p| p.deposited) + own.as_ref().map_or(0, |p| p.deposited),
+        );
+        if (config.open_value, config.pending_value) != want {
+            self.violation(format!(
+                "{what}: open_value {} and pending_value {} are not the open deposits {want:?}",
+                config.open_value, config.pending_value
+            ));
+        }
+    }
+
+    /// When the program let a proposal in or out: every proposal it accepted holds the bounds the
+    /// program holds a sponsor's terms to (Config::check_proposal_terms), an approval lands by
+    /// review_deadline and only of the world's proposal (the house's terms), and every return is
+    /// the kind its moment and signer make it: past review_deadline naming no reason an expiry
+    /// whoever signs, else the sponsor's a withdrawal, the curator's a rejection and anyone else's
+    /// refused.
+    fn audit_proposal_events(&mut self, c: &impl Chain, sent: &Sent, what: &str) {
+        let Some(p) = self.world.proposal.clone() else {
+            return;
+        };
+        let now = c.time();
+        let curator = self.world.config(c).curator;
+        for e in sent.events::<ProposalSubmitted>() {
+            let window = e.resolve_deadline - e.final_end;
+            let roles = [e.resolver, e.compliance];
+            if e.sponsor == curator
+                || roles.iter().any(|r| *r == e.sponsor || *r == curator)
+                || window < MIN_RESOLVE_WINDOW
+                || e.bond_lamports > MAX_PROPOSAL_BOND
+            {
+                self.violation(format!(
+                    "{what}: a proposal of self-dealing terms was accepted: sponsor {}, curator {curator}, resolver {}, compliance {}, resolve window {window} s, bond {}",
+                    e.sponsor, e.resolver, e.compliance, e.bond_lamports
+                ));
+            }
+        }
+        let world_proposal = self.world_proposal();
+        for e in sent.events::<ProposalApproved>() {
+            if Some(e.proposal) != world_proposal || now > p.review_deadline {
+                self.violation(format!(
+                    "{what}: {} approved at {now} (the world's proposal's review_deadline {})",
+                    e.proposal, p.review_deadline
+                ));
+            }
+        }
+        for e in sent.events::<ProposalClosed>() {
+            let review_deadline = if Some(e.proposal) == world_proposal {
+                p.review_deadline
+            } else {
+                self.user_proposal
+                    .as_ref()
+                    .map_or(i64::MAX, |u| u.review_deadline)
+            };
+            let expired = now > review_deadline && e.reason_sha256 == [0; 32];
+            let kind = if expired {
+                ProposalCloseKind::Expired
+            } else if e.by == e.sponsor {
+                ProposalCloseKind::Withdrawn
+            } else if e.by == curator {
+                ProposalCloseKind::Rejected
+            } else {
+                ProposalCloseKind::Expired
+            };
+            if e.kind != kind || (kind == ProposalCloseKind::Expired && !expired) {
+                self.violation(format!(
+                    "{what}: {:?} by {} at {now} (review_deadline {review_deadline})",
+                    e.kind, e.by
+                ));
+            }
+        }
+    }
+
+    /// The adversary's move on the sponsor's proposal (Step::Proposal); none without one.
+    fn proposal_move(&mut self, c: &mut impl Chain, op: u8) {
+        let w = self.world.clone();
+        let Some(p) = w.proposal.clone() else {
+            return;
+        };
+        let sponsor = p.sponsor;
+        let curator = w.config(c).curator;
+        let label = format!("{:?}", Step::Proposal { op });
+        let (ix, signers, needs): (Instruction, Vec<&'static Keypair>, Needs) = match op % 6 {
+            0 => {
+                let key = self.as_key(&curator);
+                (
+                    w.approve_proposal_ix(key.pubkey(), sponsor, p.cid),
+                    vec![key],
+                    self.needs_key(&curator),
+                )
+            }
+            1 => {
+                let key = self.as_key(&curator);
+                (
+                    w.close_proposal_ix(key.pubkey(), sponsor, p.cid, REASON),
+                    vec![key],
+                    self.needs_key(&curator),
+                )
+            }
+            2 => {
+                let key = Role::Attacker(0).key();
+                (
+                    w.close_proposal_ix(key.pubkey(), sponsor, p.cid, [0; 32]),
+                    vec![key],
+                    Needs::Nothing,
+                )
+            }
+            3 => {
+                // The adversary's own key as the sponsor of a new proposal, paid from the user
+                // sponsor's funding account, the curator co-signing where the adversary holds it.
+                let key = Role::Attacker(0).key();
+                let co = self.as_key(&curator);
+                let (mut terms, opens_at, review_deadline) = World::proposal_terms(c.time());
+                terms.refund_to = key.pubkey();
+                (
+                    w.submit_proposal_ix(
+                        key.pubkey(),
+                        co.pubkey(),
+                        w.user_funding,
+                        p.cid,
+                        &terms,
+                        opens_at,
+                        review_deadline,
+                    ),
+                    vec![key, co],
+                    Needs::Role(Role::UserSponsor),
+                )
+            }
+            4 => {
+                let vault = w.proposal_vault_at(&sponsor, &p.cid);
+                let sent = self.send_donation(c, w.donate_tokens_to_ix(vault, 1), &label);
+                if sent.ok {
+                    self.proposal_donated += 1;
+                    let seen = self.seen(c);
+                    self.audit(c, seen, &label);
+                }
+                return;
+            }
+            _ => {
+                let key = self.best_key();
+                (
+                    w.set_proposal_policy_ix(key.pubkey(), Role::Attacker(0).pubkey(), PENDING_CAP),
+                    vec![key],
+                    Needs::Admin,
+                )
+            }
+        };
+        self.send_needing(c, ix, &signers, needs, &label);
+    }
+
+    /// Sends the adversary's `ix` and flags a success it needs `needs` for and does not hold.
+    fn send_needing(
+        &mut self,
+        c: &mut impl Chain,
+        ix: Instruction,
+        signers: &[&Keypair],
+        needs: Needs,
+        label: &str,
+    ) -> Sent {
+        let sent = self.send(c, ix, signers, label);
+        if sent.ok {
+            let allowed = match needs {
+                Needs::Nothing => true,
+                Needs::Role(role) => self.held.contains(&role),
+                Needs::Admin | Needs::Never => false,
+            };
+            if !allowed {
+                self.violation(format!(
+                    "{label}: succeeded for an adversary holding {:?}, which it needs {needs:?} for",
+                    self.held
+                ));
+            }
+        }
+        sent
+    }
+
+    /// Step::WindDown: retire, close_escrow or close_config under the adversary's best key as
+    /// the admin (an impersonation: no compromise holds the admin's key), the lamports to the
+    /// escrow's refund_to or the adversary's own key; or close_receipt of every receipt there is,
+    /// the adversary paying the fee and signing nothing else.
+    fn wind_down_move(&mut self, c: &mut impl Chain, op: u8) {
+        let w = self.world.clone();
+        let label = format!("{:?}", Step::WindDown { op });
+        let key = self.best_key();
+        let attacker = Role::Attacker(0).pubkey();
+        let ix = match op % 4 {
+            0 => w.retire_ix(key.pubkey()),
+            1 => {
+                let refund_to = if (op / 4).is_multiple_of(2) {
+                    self.escrow(c).refund_to
+                } else {
+                    attacker
+                };
+                w.close_escrow_ix(key.pubkey(), w.escrow(), refund_to)
+            }
+            2 => w.close_config_ix(key.pubkey(), attacker),
+            _ => {
+                for role in Role::all() {
+                    if Self::is_sponsor(role)
+                        || c.anchor::<ClaimReceipt>(&w.receipt(&role.pubkey())).is_none()
+                    {
+                        continue;
+                    }
+                    let ix = w.close_receipt_ix(role.pubkey());
+                    self.send_needing(c, ix, &[], Needs::Nothing, &label);
+                }
+                return;
+            }
+        };
+        self.send_needing(c, ix, &[key], Needs::Admin, &label);
+    }
+
+    /// Where an honest party sends what goes back to the user sponsor (close_proposal's and
+    /// refund's `destination`): None, its associated token account, while nothing is there (the
+    /// program creates it) or the user sponsor still owns it; once its owner was reassigned away,
+    /// the newest token account the honest parties created for the user sponsor that it still
+    /// owns, or a new one (anyone may create a token account another key owns).
+    fn user_destination(&mut self, c: &mut impl Chain) -> Option<Pubkey> {
+        let user = Role::UserSponsor.pubkey();
+        let ata = self.world.ata(&user);
+        if token_owner(c, &ata).is_none_or(|owner| owner == user) {
+            return None;
+        }
+        if let Some(refuge) = self.user_refuges.last().copied() {
+            if token_owner(c, &refuge) == Some(user) {
+                return Some(refuge);
+            }
+        }
+        let index = self.user_refuges.len() as u32;
+        let key = keypair_derived(&[b"user-refuge".as_slice(), &index.to_le_bytes()].concat());
+        let created = self.world.create_token_account(c, &key, user);
+        self.trace.push(format!(
+            "t={} honest: a token account {} for the user sponsor: {}",
+            c.time(),
+            key.pubkey(),
+            if created { "ok" } else { "failed" }
+        ));
+        if !created {
+            return None;
+        }
+        self.user_refuges.push(key.pubkey());
+        Some(key.pubkey())
+    }
+
+    /// The user sponsor's move (Step::Sponsor); none without the world's proposal.
+    fn sponsor_move(&mut self, c: &mut impl Chain, op: u8, pick: u8) {
+        let w = self.world.clone();
+        let Some(p) = w.proposal.clone() else {
+            return;
+        };
+        let user = p.sponsor;
+        let key = self.as_key(&user);
+        let curator = w.config(c).curator;
+        let label = format!("{:?}", Step::Sponsor { op, pick });
+        let attacker = Role::Attacker(0).pubkey();
+        // A cid of the user sponsor's own: the world's proposal (even) or USER_CID's (odd).
+        let cid = if pick.is_multiple_of(2) {
+            p.cid
+        } else {
+            USER_CID
+        };
+        match op % 5 {
+            0 => {
+                let (mut terms, opens_at, review_deadline) = World::user_proposal_terms(c.time());
+                match pick % 9 {
+                    0 => {}
+                    1 => terms.resolver = user,
+                    2 => terms.compliance = user,
+                    3 => terms.resolver = curator,
+                    4 => terms.compliance = curator,
+                    5 => terms.resolve_deadline = terms.final_end + 1,
+                    6 => terms.bond_lamports = MILLION_SOL,
+                    7 => terms.resolver = Role::Attacker(1).pubkey(),
+                    _ => terms.refund_to = attacker,
+                }
+                let ix = w.submit_proposal_ix(
+                    key.pubkey(),
+                    curator,
+                    w.user_funding,
+                    USER_CID,
+                    &terms,
+                    opens_at,
+                    review_deadline,
+                );
+                // The curator co-signs whatever the sponsor submits: the program alone holds the
+                // terms (the module header).
+                let co = Role::of(&curator).map_or(Role::Attacker(1).key(), Role::key);
+                let sent =
+                    self.send_needing(c, ix, &[key, co], Needs::Role(Role::UserSponsor), &label);
+                if sent.ok {
+                    self.user_proposal = Some(ProposalSetup {
+                        sponsor: key.pubkey(),
+                        cid: USER_CID,
+                        terms,
+                        opens_at,
+                        review_deadline,
+                        submitted_at: c.time(),
+                    });
+                }
+            }
+            1 => {
+                // Past its review_deadline any signer's return naming no reason is an expiry,
+                // which anyone may send; before it only the sponsor withdraws.
+                let review_deadline = if cid == p.cid {
+                    p.review_deadline
+                } else {
+                    self.user_proposal
+                        .as_ref()
+                        .map_or(i64::MAX, |u| u.review_deadline)
+                };
+                let needs = if c.time() > review_deadline {
+                    Needs::Nothing
+                } else {
+                    Needs::Role(Role::UserSponsor)
+                };
+                let destination = self.user_destination(c);
+                let ix = w.close_proposal_to_ix(key.pubkey(), user, cid, [0; 32], destination);
+                self.send_needing(c, ix, &[key], needs, &label);
+            }
+            2 => {
+                // The way back sent to the adversary's own associated token account, which the
+                // user sponsor does not own: refused whoever signs.
+                let elsewhere = w.ata(&attacker);
+                if c.account(&elsewhere).is_none() {
+                    let create = w.create_ata_ix(Role::Payer.pubkey(), attacker);
+                    self.send_other(c, create, &[], &format!("{label}: its own token account"));
+                }
+                let (ix, signers) = if (pick / 2).is_multiple_of(2) {
+                    let ix =
+                        w.close_proposal_to_ix(key.pubkey(), user, cid, [0; 32], Some(elsewhere));
+                    (ix, vec![key])
+                } else {
+                    // refund is anyone's: the Payer sends it, no signature of the sponsor's.
+                    let address = w.escrow_at(&user, &p.cid);
+                    let Some(e) = w.escrow_state_at(c, &user, &p.cid) else {
+                        return;
+                    };
+                    (w.refund_at_ix(address, &e, Some(elsewhere)), vec![])
+                };
+                self.send_needing(c, ix, &signers, Needs::Never, &label);
+            }
+            3 => {
+                // Its associated token account's owner reassigned to the adversary's key, the
+                // account created first when absent (the #852 audit's probe P-A).
+                let ata = w.ata(&user);
+                if c.account(&ata).is_none() {
+                    let create = w.create_ata_ix(Role::Payer.pubkey(), user);
+                    self.send_other(c, create, &[], &format!("{label}: its token account"));
+                }
+                let ix = w.set_token_owner_ix(ata, key.pubkey(), attacker);
+                let sent = self.send_other(c, ix, &[key], &label);
+                if sent.ok && !self.held.contains(&Role::UserSponsor) {
+                    self.violation(format!(
+                        "{label}: the user sponsor's token account was reassigned by an adversary holding {:?}",
+                        self.held
+                    ));
+                }
+                let seen = self.seen(c);
+                self.audit(c, seen, &label);
+            }
+            _ => {
+                // A user sponsor adds nothing once its proposal opened its escrow (the #852
+                // audit's P3-3), and the world's escrow is none of its.
+                let escrow = if pick.is_multiple_of(2) {
+                    w.escrow_at(&user, &p.cid)
+                } else {
+                    w.escrow()
+                };
+                let ix = w.fund_at_ix(key.pubkey(), w.user_funding, escrow, 1);
+                self.send_needing(c, ix, &[key], Needs::Never, &label);
+            }
+        }
+    }
+
     // --------------------------------------------------------------------- the adversary
 
     /// The key the adversary signs as `key` with: `key`'s own when it holds it, else one of its
@@ -595,6 +1299,8 @@ impl Model {
             Role::Resolver,
             Role::Compliance,
             Role::Member,
+            Role::Curator,
+            Role::UserSponsor,
         ]
         .into_iter()
         .find(|r| self.held.contains(r))
@@ -681,6 +1387,18 @@ impl Model {
                 }
                 return;
             }
+            Step::Proposal { op } => {
+                self.proposal_move(c, op);
+                return;
+            }
+            Step::Sponsor { op, pick } => {
+                self.sponsor_move(c, op, pick);
+                return;
+            }
+            Step::WindDown { op } => {
+                self.wind_down_move(c, op);
+                return;
+            }
             Step::Cash { tree } => {
                 let t = usize::from(tree) % self.trees.len();
                 let cosign = self.holds(&self.escrow(c).compliance);
@@ -717,7 +1435,10 @@ impl Model {
             | Step::Tick(_)
             | Step::Approach { .. }
             | Step::Vote { .. }
-            | Step::Cash { .. } => {
+            | Step::Cash { .. }
+            | Step::Proposal { .. }
+            | Step::Sponsor { .. }
+            | Step::WindDown { .. } => {
                 unreachable!("the clock's steps and the composite ones")
             }
             Step::Reveal { tree: t, by } => {
@@ -917,6 +1638,7 @@ impl Model {
                     Role::Admin.pubkey(),
                     Role::Guardian.pubkey(),
                     Role::Attacker(0).pubkey(),
+                    Role::Curator.pubkey(),
                 ];
                 let key = self.as_key(&Role::Guardian.pubkey());
                 let needs = if on {
@@ -1004,26 +1726,25 @@ impl Model {
                 return;
             }
         };
-        let sent = self.send(c, ix, &signers, &label);
-        if sent.ok {
-            let allowed = match needs {
-                Needs::Nothing => true,
-                Needs::Role(role) => self.held.contains(&role),
-                Needs::Admin => false,
-            };
-            if !allowed {
-                self.violation(format!(
-                    "{label}: succeeded for an adversary holding {:?}, which it needs {needs:?} for",
-                    self.held
-                ));
-            }
-        }
+        self.send_needing(c, ix, &signers, needs, &label);
     }
 
     /// A donation: not this program's instruction, so the audit after it runs once the model
     /// counted it.
     fn send_donation(&mut self, c: &mut impl Chain, ix: Instruction, what: &str) -> Sent {
-        let sent = self.world.send(c, ix, &[Role::Attacker(0).key()]);
+        self.send_other(c, ix, &[Role::Attacker(0).key()], what)
+    }
+
+    /// Another program's instruction (the Token or associated token program's), traced; the
+    /// caller audits after it where it moved anything the oracle counts.
+    fn send_other(
+        &mut self,
+        c: &mut impl Chain,
+        ix: Instruction,
+        signers: &[&Keypair],
+        what: &str,
+    ) -> Sent {
+        let sent = self.world.send(c, ix, signers);
         self.trace.push(format!(
             "t={} {what}: {}",
             c.time(),
@@ -1240,6 +1961,78 @@ impl Model {
         self.close_commits(c, "crank close_commit");
         self.close_challenges(c, "crank close_challenge");
         self.close_attestations(c, "crank close_attestation");
+
+        // The user sponsor's proposals: the honest curator approves the world's (the house's
+        // terms) a day into its review and rejects any other at its first look; the crank returns
+        // each once its review_deadline has passed undecided, and refunds the escrow the world's
+        // opened once it is due. Each return goes to a token account the user sponsor owns
+        // (user_destination).
+        if let Some(p) = w.proposal.clone() {
+            let sponsor = p.sponsor;
+            let now = c.time();
+            let curator = w.config(c).curator;
+            if w.proposal_state(c, &sponsor, &p.cid).is_some()
+                && self.free(c, &curator)
+                && now >= p.submitted_at + DAY
+                && now <= p.review_deadline
+            {
+                let key = Role::of(&curator).unwrap().key();
+                let ix = w.approve_proposal_ix(key.pubkey(), sponsor, p.cid);
+                self.send(c, ix, &[key], "curator approves");
+            }
+            if w.proposal_state(c, &sponsor, &USER_CID).is_some() && self.free(c, &curator) {
+                let key = Role::of(&curator).unwrap().key();
+                let destination = self.user_destination(c);
+                let ix =
+                    w.close_proposal_to_ix(key.pubkey(), sponsor, USER_CID, REASON, destination);
+                self.send(c, ix, &[key], "curator rejects the sponsor's own terms");
+            }
+            for (cid, review_deadline) in [
+                (p.cid, p.review_deadline),
+                (
+                    USER_CID,
+                    self.user_proposal
+                        .as_ref()
+                        .map_or(i64::MAX, |u| u.review_deadline),
+                ),
+            ] {
+                if w.proposal_state(c, &sponsor, &cid).is_some() && now > review_deadline {
+                    let key = Role::Payer.key();
+                    let destination = self.user_destination(c);
+                    let ix =
+                        w.close_proposal_to_ix(key.pubkey(), sponsor, cid, [0; 32], destination);
+                    self.send(c, ix, &[key], "crank expires a proposal");
+                }
+            }
+            let address = w.escrow_at(&sponsor, &p.cid);
+            if let Some(e) = w.escrow_state_at(c, &sponsor, &p.cid) {
+                let escrow_now = prize_escrow::escrow_now(&e, &w.config(c), now);
+                let due = match e.status {
+                    EscrowStatus::Closed => false,
+                    EscrowStatus::Claimable => escrow_now > e.claim_deadline,
+                    EscrowStatus::Open => escrow_now >= e.resolve_deadline,
+                    _ => escrow_now > e.hard_deadline,
+                };
+                if due {
+                    let destination = self.user_destination(c);
+                    let ix = w.refund_at_ix(address, &e, destination);
+                    self.send(c, ix, &[], "crank refunds the proposal's escrow");
+                }
+            }
+        }
+    }
+
+    /// Whether the user sponsor's proposals (if any) are out (approved or returned) and the
+    /// escrow the world's opened, if it did, refunded: nothing they held still counts against
+    /// pending_value or open_value.
+    fn proposal_settled(&self, c: &impl Chain) -> bool {
+        self.world.proposal.as_ref().is_none_or(|p| {
+            let w = &self.world;
+            w.proposal_state(c, &p.sponsor, &p.cid).is_none()
+                && w.proposal_state(c, &p.sponsor, &USER_CID).is_none()
+                && w.escrow_state_at(c, &p.sponsor, &p.cid)
+                    .is_none_or(|e| e.status == EscrowStatus::Closed)
+        })
     }
 
     /// Closes every vote of the escrow's panel once it is Closed (close_attestation): its rent goes
@@ -1325,6 +2118,12 @@ impl Model {
                 ));
             }
         }
+        if !self.proposal_settled(c) {
+            end.push(
+                "a proposal was neither approved nor returned, or the escrow an approval opened was never refunded: pending_value or open_value pinned"
+                    .to_string(),
+            );
+        }
         if self.who.winners_paid() {
             for i in 0..2u8 {
                 let got = c.tokens(&w.ata(&Role::Winner(i).pubkey()));
@@ -1348,6 +2147,7 @@ impl Model {
         let w = &self.world;
         let e = self.escrow(c);
         e.status == EscrowStatus::Closed
+            && self.proposal_settled(c)
             && self
                 .commits
                 .iter()
@@ -1360,6 +2160,14 @@ impl Model {
                 .iter()
                 .all(|regrader| w.voted(c, regrader).is_none())
     }
+}
+
+/// The owner of the token account at `address`, or None when there is none.
+fn token_owner(c: &impl Chain, address: &Pubkey) -> Option<Pubkey> {
+    c.account(address)
+        .filter(|a| a.lamports > 0 && a.data.len() == spl_token::state::Account::LEN)
+        .and_then(|a| spl_token::state::Account::unpack(&a.data).ok())
+        .map(|t| t.owner)
 }
 
 /// The claimants hold and release target: the winners and the adversary's two.

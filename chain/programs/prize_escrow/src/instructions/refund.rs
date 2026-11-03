@@ -1,6 +1,6 @@
-use anchor_lang::prelude::*;
+use anchor_lang::{error::ErrorCode as AnchorError, prelude::*, system_program};
 use anchor_spl::{
-    associated_token::AssociatedToken,
+    associated_token::{self, AssociatedToken},
     token::{
         close_account, transfer_checked, CloseAccount, Mint, Token, TokenAccount, TransferChecked,
     },
@@ -15,11 +15,64 @@ use crate::{
     state::{Escrow, EscrowStatus},
 };
 
+/// Where a sweep to `owner` lands (refund's to refund_to, close_proposal's to the sponsor), with
+/// its token account state: `named`, the account the caller passed as `destination` (its
+/// constraints held it to a token account of the mint that `owner` owns, `token::authority`), or
+/// else `ata`, `owner`'s associated token account of the mint (its address held by its seeds),
+/// created here when nothing is there yet (`payer` paying its rent, as init_if_needed did) and
+/// refused unless `owner` still owns it (ConstraintTokenOwner).
+///
+/// The choice is what keeps the way back open (the #852 audit's P2-2): a classic Token account's
+/// owner can be reassigned (SetAuthority AccountOwner), and an associated account reassigned away
+/// from `owner` stays at its address, so a sweep pinned to that address would be refused for good,
+/// and with it the release of open_value or pending_value. Anyone may create a token account
+/// `owner` owns (InitializeAccount3 takes no signature of the owner's) and name it.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one per account the create of the associated account needs"
+)]
+pub(crate) fn sweep_destination<'info>(
+    named: Option<&Account<'info, TokenAccount>>,
+    ata: AccountInfo<'info>,
+    owner: AccountInfo<'info>,
+    mint: AccountInfo<'info>,
+    payer: AccountInfo<'info>,
+    token_program: AccountInfo<'info>,
+    associated_token_program: AccountInfo<'info>,
+    system_program: AccountInfo<'info>,
+) -> Result<(AccountInfo<'info>, TokenAccount)> {
+    if let Some(named) = named {
+        return Ok((named.to_account_info(), TokenAccount::clone(named)));
+    }
+    if ata.owner == &system_program::ID {
+        associated_token::create(CpiContext::new(
+            associated_token_program.key(),
+            associated_token::Create {
+                payer,
+                associated_token: ata.clone(),
+                authority: owner.clone(),
+                mint: mint.clone(),
+                system_program,
+                token_program,
+            },
+        ))?;
+    }
+    require_keys_eq!(
+        *ata.owner,
+        anchor_spl::token::ID,
+        AnchorError::AccountOwnedByWrongProgram
+    );
+    let state = TokenAccount::try_deserialize(&mut &ata.try_borrow_data()?[..])?;
+    require_keys_eq!(state.mint, mint.key(), AnchorError::ConstraintTokenMint);
+    require_keys_eq!(state.owner, owner.key(), AnchorError::ConstraintTokenOwner);
+    Ok((ata, state))
+}
+
 /// Permissionless: once a refund condition holds, anyone may sweep the vault to refund_to.
 #[event_cpi]
 #[derive(Accounts)]
 pub struct Refund<'info> {
-    /// Pays the fees and, if needed, refund_to's token account rent.
+    /// Pays the fees and, if needed, the rent of refund_to's associated token account.
     #[account(mut)]
     pub payer: Signer<'info>,
 
@@ -44,14 +97,18 @@ pub struct Refund<'info> {
     #[account(mut)]
     pub refund_to: UncheckedAccount<'info>,
 
+    /// refund_to's associated token account of the mint, its address held by the seeds (the client
+    /// derives it): where the vault goes unless `destination` names another account of
+    /// refund_to's, created when absent and refused unless refund_to still owns it
+    /// (sweep_destination).
+    /// CHECK: the seeds hold its address; sweep_destination reads or creates the account.
     #[account(
-        init_if_needed,
-        payer = payer,
-        associated_token::mint = mint,
-        associated_token::authority = refund_to,
-        associated_token::token_program = token_program,
+        mut,
+        seeds = [refund_to.key().as_ref(), token_program.key().as_ref(), mint.key().as_ref()],
+        seeds::program = anchor_spl::associated_token::ID,
+        bump,
     )]
-    pub refund_to_token_account: Account<'info, TokenAccount>,
+    pub refund_to_token_account: UncheckedAccount<'info>,
 
     /// CHECK: only receives a bond still held (e.g. a Frozen escrow); pinned to escrow.resolver.
     #[account(mut, address = escrow.resolver @ EscrowError::UnauthorizedResolver)]
@@ -65,14 +122,28 @@ pub struct Refund<'info> {
     /// (written: the escrow's deposit comes off open_value).
     #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Account<'info, Config>,
+
+    /// Optional: any token account of the mint refund_to owns, where the vault goes instead of
+    /// refund_to_token_account, so a refund_to that reassigned its associated account's owner
+    /// cannot pin the escrow (and open_value) by it.
+    #[account(
+        mut,
+        token::mint = mint,
+        token::authority = refund_to,
+        token::token_program = token_program,
+    )]
+    pub destination: Option<Account<'info, TokenAccount>>,
 }
 
 /// Every deadline is read on the escrow clock, so a stop or a freeze never lets claim_deadline lapse
 /// into a refund; nothing refunds while a PayoutStop or the guardian's freeze of the escrow is in
 /// force (PayoutStopped, EscrowFrozen), and a vault or refund_to token account the mint froze is
 /// refused by name (VaultFrozen, RefundAccountFrozen). The refund is exempt from the flow bucket:
-/// its destination is pinned (refund_to, the sponsor on the allowlist). It takes the escrow's
-/// deposit off Config.open_value.
+/// whoever sends it, it pays only refund_to, which open_escrow and submit_proposal hold to the
+/// escrow's own sponsor (RefundToNotSponsor), into a token account refund_to owns (its associated
+/// one, or the `destination` it owns: sweep_destination), so no caller can turn it into an outflow
+/// to anyone else, an allowlisted sponsor's or a proposal's. It takes the escrow's deposit off
+/// Config.open_value.
 ///
 /// Allowed when one of these holds ("past" a deadline means after the last second the step it
 /// closes may still run):
@@ -109,7 +180,11 @@ pub struct Refund<'info> {
 ///
 /// Sweeps the whole vault (an empty one too, so a fully claimed escrow still closes; the
 /// unclaimed leaves, the unawarded rest and any donation alike) to refund_to's token account,
-/// closes the vault with its rent to refund_to, returns the resolver's bond if still held, and
+/// closes the vault with its rent to refund_to (for an escrow a proposal opened, the curator paid
+/// that rent at the approval, one 165-byte token account's, 1,488,440 lamports under the rent the
+/// tests pin, and it ends with the sponsor: accepted, a cost of the approval like the Escrow
+/// account's own rent, which stays as the Closed replay marker), returns the resolver's bond if
+/// still held, and
 /// leaves the escrow account alive as Closed: its PDA cannot be opened again, and every
 /// instruction but close_challenge refuses a Closed escrow. A refund decides nothing: the
 /// challengers' bonds still held (a dispute no side won: Disputed with no quorum recorded, or
@@ -145,11 +220,19 @@ pub fn handle_refund(ctx: Context<Refund>) -> Result<()> {
         }
     }
     require!(!ctx.accounts.vault.is_frozen(), EscrowError::VaultFrozen);
-    require!(
-        !ctx.accounts.refund_to_token_account.is_frozen(),
-        EscrowError::RefundAccountFrozen
-    );
+    let (to, to_state) = sweep_destination(
+        ctx.accounts.destination.as_ref(),
+        ctx.accounts.refund_to_token_account.to_account_info(),
+        ctx.accounts.refund_to.to_account_info(),
+        ctx.accounts.mint.to_account_info(),
+        ctx.accounts.payer.to_account_info(),
+        ctx.accounts.token_program.to_account_info(),
+        ctx.accounts.associated_token_program.to_account_info(),
+        ctx.accounts.system_program.to_account_info(),
+    )?;
+    require!(!to_state.is_frozen(), EscrowError::RefundAccountFrozen);
 
+    let escrow = &ctx.accounts.escrow;
     let amount = ctx.accounts.vault.amount;
     let seeds = escrow.signer_seeds();
     let signer: &[&[&[u8]]] = &[&seeds];
@@ -161,7 +244,7 @@ pub fn handle_refund(ctx: Context<Refund>) -> Result<()> {
                 TransferChecked {
                     from: ctx.accounts.vault.to_account_info(),
                     mint: ctx.accounts.mint.to_account_info(),
-                    to: ctx.accounts.refund_to_token_account.to_account_info(),
+                    to,
                     authority: escrow.to_account_info(),
                 },
                 signer,
