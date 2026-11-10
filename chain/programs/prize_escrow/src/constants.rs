@@ -28,31 +28,31 @@ pub const CHALLENGE_SEED: &[u8] = b"challenge";
 
 const HOUR: i64 = 60 * 60;
 
-/// The shortest challenge window open_escrow accepts, in seconds: 72 h. The `test-windows`
+/// The shortest challenge window open_escrow accepts, in seconds: 24 h. The `test-windows`
 /// feature (localnet and devnet builds only) lowers it to 60 s.
 #[constant]
 pub const MIN_CHALLENGE_WINDOW: i64 = if cfg!(feature = "test-windows") {
     60
 } else {
-    72 * HOUR
+    24 * HOUR
 };
 
-/// The shortest attestation window open_escrow accepts, in seconds: 48 h (60 s under
+/// The shortest attestation window open_escrow accepts, in seconds: 24 h (60 s under
 /// `test-windows`).
 #[constant]
 pub const MIN_ATTEST_WINDOW: i64 = if cfg!(feature = "test-windows") {
     60
 } else {
-    48 * HOUR
+    24 * HOUR
 };
 
-/// The shortest compliance hold window open_escrow accepts, in seconds: 72 h (60 s under
+/// The shortest compliance hold window open_escrow accepts, in seconds: 24 h (60 s under
 /// `test-windows`). A requested claim with no on-chain hold clears once it passes.
 #[constant]
 pub const MIN_HOLD_WINDOW: i64 = if cfg!(feature = "test-windows") {
     60
 } else {
-    72 * HOUR
+    24 * HOUR
 };
 
 /// The shortest claim window open_escrow accepts, in seconds: 7 days, so winners always get a
@@ -268,7 +268,7 @@ mod tests {
         if cfg!(feature = "test-windows") {
             assert_eq!(windows, [60, 60, 60, 90]);
         } else {
-            assert_eq!(windows, [72 * HOUR, 48 * HOUR, 72 * HOUR, 7 * 24 * HOUR]);
+            assert_eq!(windows, [24 * HOUR, 24 * HOUR, 24 * HOUR, 7 * 24 * HOUR]);
         }
     }
 }

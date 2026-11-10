@@ -128,7 +128,8 @@ pub struct EscrowTerms {
     pub final_end: i64,
     /// Unix seconds: post_result must land before it, or the pot can be refunded in full.
     pub resolve_deadline: i64,
-    /// Seconds a posted result stays challengeable (at least MIN_CHALLENGE_WINDOW).
+    /// Seconds a posted result stays challengeable (at least MIN_CHALLENGE_WINDOW; from 0 when a
+    /// house sponsor opens the escrow: EscrowTerms::validate_for_sponsor).
     pub challenge_window: i64,
     /// Seconds regraders have to attest once the challenge window has closed (at least
     /// MIN_ATTEST_WINDOW): attest_deadline is challenge_deadline + attest_window, set by the first
@@ -161,6 +162,16 @@ impl EscrowTerms {
     /// - hard_deadline >= resolve_deadline + challenge_window + attest_window + hold_window +
     ///   claim_window + ARBITER_SLACK (HardDeadlineTooEarly).
     pub fn validate(&self, now: i64, min_bond: u64) -> Result<()> {
+        self.validate_for_sponsor(now, min_bond, false)
+    }
+
+    /// EscrowTerms::validate, for a sponsor that is (`house_sponsor`) or is not one of the
+    /// Config's house sponsors (Config::is_house_sponsor). A house sponsor's challenge_window may
+    /// be anything from 0 to MAX_WINDOW: MIN_CHALLENGE_WINDOW does not hold it (the owner's
+    /// ruling of 2026-11-10: a house reward needs no challenge window). Every other bound holds
+    /// as validate states it. Only open_escrow passes true, and only for a house sponsor; a
+    /// proposal's terms are always held to validate.
+    pub fn validate_for_sponsor(&self, now: i64, min_bond: u64, house_sponsor: bool) -> Result<()> {
         require!(
             self.total > 0 && self.bond_lamports > 0,
             EscrowError::InvalidAmount
@@ -184,8 +195,13 @@ impl EscrowTerms {
             );
         }
 
+        let min_challenge = if house_sponsor {
+            0
+        } else {
+            MIN_CHALLENGE_WINDOW
+        };
         for (window, min) in [
-            (self.challenge_window, MIN_CHALLENGE_WINDOW),
+            (self.challenge_window, min_challenge),
             (self.attest_window, MIN_ATTEST_WINDOW),
             (self.hold_window, MIN_HOLD_WINDOW),
             (self.claim_window, MIN_CLAIM_WINDOW),

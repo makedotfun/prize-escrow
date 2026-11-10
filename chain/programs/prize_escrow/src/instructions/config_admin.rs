@@ -300,8 +300,10 @@ pub fn handle_set_proposal_policy(
     Ok(())
 }
 
-/// Adds `key` to `list` (`house` marks a house regrader) or takes it off; escrows already open
-/// keep what they named.
+/// Adds `key` to `list` (`house` marks a house regrader or a house sponsor) or takes it off;
+/// escrows already open keep what they named. A sponsor already listed is not refused: `allowed`
+/// with `house` marks it a house sponsor, without unmarks it, and nothing else changes
+/// (Config::allow_or_mark); a mint or a regrader listed twice is still AlreadyListed.
 pub fn handle_set_allowed(
     ctx: Context<AdminConfig>,
     list: AllowList,
@@ -311,7 +313,7 @@ pub fn handle_set_allowed(
 ) -> Result<()> {
     let config = &mut ctx.accounts.config;
     let change = if allowed {
-        config.allow(list, key, house)?;
+        config.allow_or_mark(list, key, house)?;
         ConfigChange::Allowed
     } else {
         config.disallow(list, key)?;
@@ -324,7 +326,7 @@ pub fn handle_set_allowed(
         ctx.accounts.admin.key(),
         key,
         Some(list),
-        allowed && house && list == AllowList::Regrader,
+        allowed && house && list != AllowList::Mint,
     );
     emit_cpi!(event);
     Ok(())

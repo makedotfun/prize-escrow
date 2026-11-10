@@ -1,6 +1,6 @@
 //! Regressions for the findings of the 2026-10-27 drill, one named test each, on the release build
-//! (`node scripts/chain/build.ts release` first) with the release windows (72 h to challenge, 48 h
-//! to attest, 72 h on hold), time moved by rewriting LiteSVM's Clock:
+//! (`node scripts/chain/build.ts release` first) with the release windows (24 h to challenge, 24 h
+//! to attest, 24 h on hold), time moved by rewriting LiteSVM's Clock:
 //! - F1: a quorum cannot settle before challenge_deadline.
 //! - F2: a late challenge gets its full attest window.
 //! - F3: the arbiter cannot pick a vote-less alternative.
@@ -223,7 +223,7 @@ fn f1_a_quorum_cannot_settle_before_the_challenge_deadline() {
     assert_eq!((t.state().votes_result, t.state().k), (2, 2), "a quorum");
     for time in [
         FINAL_END + 61,
-        FINAL_END + DAY,
+        FINAL_END + 12 * HOUR,
         CHALLENGE_DEADLINE - HOUR,
         CHALLENGE_DEADLINE - 1,
     ] {
@@ -275,22 +275,22 @@ fn f1_a_quorum_cannot_settle_before_the_challenge_deadline() {
     t.at(FINAL_END + HOUR);
     let freeze = t.w.set_freeze_ix(Role::Guardian.pubkey(), true);
     expect_ok(t.guardian(freeze), "freeze");
-    t.at(FINAL_END + HOUR + DAY);
+    t.at(FINAL_END + HOUR + 12 * HOUR);
     let unfreeze = t.w.set_freeze_ix(Role::Admin.pubkey(), false);
-    expect_ok(t.admin(unfreeze), "the admin unfreezes a day later");
+    expect_ok(t.admin(unfreeze), "the admin unfreezes half a day later");
     t.at(CHALLENGE_DEADLINE);
     expect_refused(
         t.settle(),
         EscrowError::DeadlineNotReached,
-        "settle at the wall-clock deadline, a frozen day behind",
+        "settle at the wall-clock deadline, a frozen half day behind",
     );
-    t.at(CHALLENGE_DEADLINE + DAY - 1);
+    t.at(CHALLENGE_DEADLINE + 12 * HOUR - 1);
     expect_refused(
         t.settle(),
         EscrowError::DeadlineNotReached,
         "one second short",
     );
-    t.at(CHALLENGE_DEADLINE + DAY);
+    t.at(CHALLENGE_DEADLINE + 12 * HOUR);
     expect_ok(t.settle(), "settle once the escrow clock reaches it");
 
     // A commit on the window's last second holds settle until its reveal grace is over.
@@ -850,17 +850,17 @@ fn f6_open_refuses_attacker_terms() {
             EscrowError::ComplianceRequired,
         ),
         (
-            "a challenge window under 72 h",
+            "a challenge window under 24 h",
             with(&|t| t.challenge_window = MIN_CHALLENGE_WINDOW - 1),
             EscrowError::InvalidWindow,
         ),
         (
-            "an attest window under 48 h",
+            "an attest window under 24 h",
             with(&|t| t.attest_window = MIN_ATTEST_WINDOW - 1),
             EscrowError::InvalidWindow,
         ),
         (
-            "a hold window under 72 h",
+            "a hold window under 24 h",
             with(&|t| t.hold_window = MIN_HOLD_WINDOW - 1),
             EscrowError::InvalidWindow,
         ),
@@ -1083,7 +1083,7 @@ fn a1_an_overturn_settles_only_at_the_attest_deadline() {
     let mut t = overturned();
     for time in [
         CHALLENGE_DEADLINE,
-        CHALLENGE_DEADLINE + DAY,
+        CHALLENGE_DEADLINE + 12 * HOUR,
         ATTEST_DEADLINE - 1,
     ] {
         t.at(time);

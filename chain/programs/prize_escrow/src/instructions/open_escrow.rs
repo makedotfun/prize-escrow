@@ -70,14 +70,21 @@ pub struct OpenEscrow<'info> {
 /// VaultFrozen). The escrow keeps Config's global stopped seconds (its clock counts only stops
 /// after it opened) and reveal grace (always shorter than its attest window: MAX_REVEAL_GRACE <
 /// MIN_ATTEST_WINDOW).
+///
+/// The house path: a sponsor the admin marked as a house sponsor (Config::is_house_sponsor) may
+/// open with any challenge window from 0, neither MIN_CHALLENGE_WINDOW
+/// (EscrowTerms::validate_for_sponsor) nor Config.min_challenge_window (check_terms_policy) holding
+/// it; every other bound holds. With a window of 0, post_result's challenge_deadline is the moment
+/// it lands, so no challenge can be committed and settle may follow at once.
 pub fn handle_open_escrow(
     ctx: Context<OpenEscrow>,
     competition_id: [u8; 16],
     terms: EscrowTerms,
 ) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
-    terms.validate(now, bond_floor(&Rent::get()?))?;
     let sponsor = ctx.accounts.sponsor.key();
+    let house_sponsor = ctx.accounts.config.is_house_sponsor(&sponsor);
+    terms.validate_for_sponsor(now, bond_floor(&Rent::get()?), house_sponsor)?;
     let mint = ctx.accounts.mint.key();
     let escrow_key = ctx.accounts.escrow.key();
     let config = &mut ctx.accounts.config;

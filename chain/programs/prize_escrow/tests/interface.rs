@@ -94,10 +94,11 @@ fn account_sizes_are_pinned() {
     // Config: bump, stop and max_house_regraders + 4 keys (admin, pending_admin, guardian,
     // arbiter) + 16 u64/i64 + the four lists at their longest (4 mints, 32 sponsors, 16 registry
     // entries of 33 bytes, 16 revoked keys, each with its 4-byte length) + what were 64 reserved
-    // bytes: min_regraders (1), the curator, pending_value and pending_cap (48), retired (1) and
-    // live_escrows (4), and 10 still reserved. The size, and every field's offset before them,
-    // are what they were: a Config written before the carve-outs reads min_regraders 0, no
-    // curator (proposals off), nothing pending, not retired and no escrow counted.
+    // bytes: min_regraders (1), the curator, pending_value and pending_cap (48), retired (1),
+    // live_escrows (4) and house_sponsors (4), and 6 still reserved. The size, and every field's
+    // offset before them, are what they were: a Config written before the carve-outs reads
+    // min_regraders 0, no curator (proposals off), nothing pending, not retired, no escrow
+    // counted and no house sponsor.
     assert_eq!(
         Config::INIT_SPACE,
         3 + 4 * 32
@@ -106,7 +107,7 @@ fn account_sizes_are_pinned() {
             + (4 + 32 * 32)
             + (4 + 16 * 33)
             + (4 + 16 * 32)
-            + (1 + 32 + 8 + 8 + 1 + 4 + 10)
+            + (1 + 32 + 8 + 8 + 1 + 4 + 4 + 6)
     );
     assert_eq!(Config::SPACE, 2539);
     // EscrowTerms at its longest (MAX_REGRADERS regraders): the total, the rules hash, 4 keys
@@ -190,9 +191,9 @@ fn account_sizes_are_pinned() {
 #[test]
 fn constants_are_the_release_values() {
     // `cargo test` builds without the test-windows feature, like the release .so.
-    assert_eq!(MIN_CHALLENGE_WINDOW, 72 * 60 * 60);
-    assert_eq!(MIN_ATTEST_WINDOW, 48 * 60 * 60);
-    assert_eq!(MIN_HOLD_WINDOW, 72 * 60 * 60);
+    assert_eq!(MIN_CHALLENGE_WINDOW, 24 * 60 * 60);
+    assert_eq!(MIN_ATTEST_WINDOW, 24 * 60 * 60);
+    assert_eq!(MIN_HOLD_WINDOW, 24 * 60 * 60);
     assert_eq!(MIN_CLAIM_WINDOW, 7 * 24 * 60 * 60);
     assert_eq!(BOND_FLOOR_RENTS, 2);
     assert_eq!(bond_floor(&Rent::default()), FLOOR);
@@ -600,6 +601,11 @@ fn instructions() -> Vec<(&'static str, &'static [u8], bool)> {
         ),
         ("submit_proposal", ixs::SubmitProposal::DISCRIMINATOR, true),
         (
+            "set_proposal_rules",
+            ixs::SetProposalRules::DISCRIMINATOR,
+            true,
+        ),
+        (
             "approve_proposal",
             ixs::ApproveProposal::DISCRIMINATOR,
             false,
@@ -612,7 +618,7 @@ fn instructions() -> Vec<(&'static str, &'static [u8], bool)> {
 }
 
 /// The error codes in wire order; append only.
-const ERRORS: [(EscrowError, &str); 116] = [
+const ERRORS: [(EscrowError, &str); 118] = [
     (EscrowError::UnauthorizedResolver, "UnauthorizedResolver"),
     (EscrowError::UnauthorizedArbiter, "UnauthorizedArbiter"),
     (EscrowError::NotARegrader, "NotARegrader"),
@@ -747,6 +753,8 @@ const ERRORS: [(EscrowError, &str); 116] = [
     (EscrowError::CommitsOutstanding, "CommitsOutstanding"),
     (EscrowError::ValueOutstanding, "ValueOutstanding"),
     (EscrowError::EscrowsOutstanding, "EscrowsOutstanding"),
+    (EscrowError::RulesNotSet, "RulesNotSet"),
+    (EscrowError::RulesAlreadySet, "RulesAlreadySet"),
 ];
 
 fn bytes(v: &Value) -> Vec<u8> {
@@ -1050,13 +1058,18 @@ fn committed_idl_matches_the_program() {
         [&Value::from("escrow"), &Value::from("regrader")]
     );
     assert_eq!(arg_names("set_min_regraders"), ["min_regraders"]);
-    // The proposals: the sponsor and the curator both sign the submit; the approval takes no
-    // argument, so it cannot change a term; the return goes to an account the sponsor owns, never
-    // an argument.
+    // The proposals: the sponsor and the curator both sign the submit; the curator's rules hash
+    // is the one term written after it; the approval takes no argument, so it cannot change a
+    // term; the return goes to an account the sponsor owns, never an argument.
     assert_eq!(arg_names("set_proposal_policy"), ["curator", "pending_cap"]);
     assert_eq!(
         arg_names("submit_proposal"),
         ["competition_id", "terms", "opens_at", "review_deadline"]
+    );
+    assert_eq!(arg_names("set_proposal_rules"), ["rules_sha256"]);
+    assert_eq!(
+        named(&idl["instructions"], "set_proposal_rules")["args"][0]["type"],
+        serde_json::json!({ "array": ["u8", 32] })
     );
     assert!(arg_names("approve_proposal").is_empty());
     assert_eq!(arg_names("close_proposal"), ["reason_sha256"]);
@@ -1088,6 +1101,30 @@ fn committed_idl_matches_the_program() {
             "{signer} signs the submit"
         );
     }
+    // set_proposal_rules writes the proposal alone: the curator signs and pays nothing, and the
+    // Config is read, never written.
+    assert_eq!(
+        account_names("set_proposal_rules"),
+        [
+            "curator",
+            "proposal",
+            "config",
+            "event_authority",
+            "program"
+        ]
+    );
+    let rules_account = |account: &str| -> Value {
+        named(
+            &named(&idl["instructions"], "set_proposal_rules")["accounts"],
+            account,
+        )
+        .clone()
+    };
+    assert_eq!(rules_account("curator")["signer"], true);
+    assert_ne!(rules_account("curator")["writable"], true);
+    assert_eq!(rules_account("proposal")["writable"], true);
+    assert_ne!(rules_account("proposal")["signer"], true);
+    assert_ne!(rules_account("config")["writable"], true);
     assert_eq!(
         account_names("approve_proposal"),
         [
@@ -1211,6 +1248,21 @@ fn committed_idl_matches_the_program() {
             &Value::from("proposal.competition_id")
         ]
     );
+    // set_proposal_rules holds the proposal to its own PDA, read from the account it names:
+    // ["proposal", proposal.sponsor, proposal.competition_id].
+    let rules_proposal_seeds = &rules_account("proposal")["pda"]["seeds"];
+    assert_eq!(rules_proposal_seeds.as_array().unwrap().len(), 3);
+    assert_eq!(bytes(&rules_proposal_seeds[0]["value"]), PROPOSAL_SEED);
+    assert_eq!(
+        [
+            &rules_proposal_seeds[1]["path"],
+            &rules_proposal_seeds[2]["path"]
+        ],
+        [
+            &Value::from("proposal.sponsor"),
+            &Value::from("proposal.competition_id")
+        ]
+    );
     let variants = |name: &str| -> Vec<String> {
         named(&idl["types"], name)["type"]["variants"]
             .as_array()
@@ -1263,12 +1315,12 @@ fn committed_idl_matches_the_program() {
             .map(|f| f["name"].as_str().unwrap().to_owned())
             .collect()
     };
-    // Config's min_regraders, then the proposal policy, sit where reserved began, so the fields
-    // before them keep their bytes; ConfigChanged appends them in the same order, so an event
-    // from before either ends where its fields start.
+    // Config's min_regraders, then the proposal policy, the wind-down and the house sponsors, sit
+    // where reserved began, so the fields before them keep their bytes; ConfigChanged appends the
+    // first two in the same order, so an event from before either ends where its fields start.
     let config_fields = fields("Config");
     assert_eq!(
-        config_fields[config_fields.len() - 8..],
+        config_fields[config_fields.len() - 9..],
         [
             "revoked",
             "min_regraders",
@@ -1277,6 +1329,7 @@ fn committed_idl_matches_the_program() {
             "pending_cap",
             "retired",
             "live_escrows",
+            "house_sponsors",
             "reserved"
         ]
     );
@@ -1304,6 +1357,10 @@ fn committed_idl_matches_the_program() {
     assert_eq!(
         fields("ConfigClosed"),
         ["config", "by", "recipient", "lamports"]
+    );
+    assert_eq!(
+        fields("ProposalRulesSet"),
+        ["proposal", "sponsor", "competition_id", "rules_sha256"]
     );
     let config_changed = fields("ConfigChanged");
     assert_eq!(
@@ -1428,7 +1485,7 @@ fn committed_idl_matches_the_program() {
         );
     }
 
-    let events: [(&str, &[u8]); 30] = [
+    let events: [(&str, &[u8]); 31] = [
         (
             "ProposalSubmitted",
             prize_escrow::ProposalSubmitted::DISCRIMINATOR,
@@ -1436,6 +1493,10 @@ fn committed_idl_matches_the_program() {
         (
             "ProposalApproved",
             prize_escrow::ProposalApproved::DISCRIMINATOR,
+        ),
+        (
+            "ProposalRulesSet",
+            prize_escrow::ProposalRulesSet::DISCRIMINATOR,
         ),
         (
             "ProposalClosed",

@@ -9,7 +9,9 @@
 //! approves or rejects; the schedule keeps the review inside MAX_REVIEW_WINDOW and before the
 //! competition opens; the pending cap, C_e and C_g hold proposals and direct opens together; a
 //! donation never blocks an approval; IntakeStop stops submits and approvals but never the way
-//! back, which only a PayoutStop holds.
+//! back, which only a PayoutStop holds; a proposal submitted with an all-zero rules hash is
+//! approved only once the curator of the day sets it (set_proposal_rules), once and inside the
+//! review.
 //!
 //! And the #852 audit's findings, its probes as the cases: a sponsor sets no self-dealing terms
 //! (P2-1, probe P-B: itself or the curator as the resolver or the compliance key, a resolve window
@@ -34,8 +36,8 @@ use {
     prize_escrow::{
         AllowList, ConfigChange, ConfigChanged, ConfigRole, EscrowError, EscrowOpened,
         EscrowStatus, EscrowTerms, Proposal, ProposalApproved, ProposalCloseKind, ProposalClosed,
-        ProposalSubmitted, Refunded, StopState, MAX_PROPOSAL_BOND, MAX_REVIEW_WINDOW,
-        MIN_RESOLVE_WINDOW,
+        ProposalRulesSet, ProposalSubmitted, Refunded, StopState, MAX_PROPOSAL_BOND,
+        MAX_REVIEW_WINDOW, MIN_RESOLVE_WINDOW,
     },
     solana_keypair::Keypair,
     solana_signer::Signer,
@@ -126,6 +128,39 @@ fn approve(svm: &mut LiteSVM, w: &World, curator: &Keypair, cid: [u8; 16]) -> Se
 fn close(svm: &mut LiteSVM, w: &World, by: &Keypair, cid: [u8; 16], reason: [u8; 32]) -> Sent {
     let ix = w.close_proposal_ix(by.pubkey(), Role::Sponsor.pubkey(), cid, reason);
     w.send(svm, ix, &[by])
+}
+
+/// set_proposal_rules of the sponsor's proposal at `cid`, signed by `curator`.
+fn set_rules(
+    svm: &mut LiteSVM,
+    w: &World,
+    curator: &Keypair,
+    cid: [u8; 16],
+    rules_sha256: [u8; 32],
+) -> Sent {
+    let ix = support::instruction(
+        prize_escrow::accounts::SetProposalRules {
+            curator: curator.pubkey(),
+            proposal: w.proposal_at(&sponsor(), &cid),
+            config: prize_escrow::Config::pda().0,
+            event_authority: support::EVENT_AUTHORITY,
+            program: prize_escrow::ID,
+        },
+        prize_escrow::instruction::SetProposalRules { rules_sha256 },
+    );
+    w.send(svm, ix, &[curator])
+}
+
+/// submit_proposal of `cid` with the plan's terms but an all-zero rules hash: a deposit made
+/// before its rules were written. Returns the terms as submitted.
+fn submit_unruled(svm: &mut LiteSVM, w: &World, cid: [u8; 16]) -> EscrowTerms {
+    let (mut terms, opens_at, review_deadline) = plan();
+    terms.rules_sha256 = [0; 32];
+    expect_ok(
+        submit_with(svm, w, cid, &terms, opens_at, review_deadline),
+        "submit_proposal, no rules",
+    );
+    terms
 }
 
 fn sponsor() -> Pubkey {
@@ -1767,5 +1802,312 @@ fn with_no_destination_the_way_back_creates_the_associated_account() {
         payer_before - svm.lamports(&Role::Payer.pubkey())
             >= svm.rent_exempt(anchor_spl::token::spl_token::state::Account::LEN),
         "the payer paid the associated account's rent"
+    );
+}
+
+// ------------------------------------------------------------------------- the rules hash
+
+/// A deposit submitted before its rules were written: submit_proposal takes the all-zero hash,
+/// approve_proposal refuses it (RulesNotSet) until the curator writes the hash with
+/// set_proposal_rules, once, and the approval then opens the escrow open_escrow opens with it.
+#[test]
+fn a_proposal_submitted_without_rules_lists_once_the_curator_sets_them() {
+    let (mut svm, w) = world();
+    let mut twin = svm.clone();
+    let terms = submit_unruled(&mut svm, &w, PCID);
+    let proposal_key = w.proposal_at(&sponsor(), &PCID);
+    let submitted = w.proposal_state(&svm, &sponsor(), &PCID).unwrap();
+    assert_eq!(
+        submitted.terms, terms,
+        "the submit stores the all-zero hash"
+    );
+    assert_eq!(svm.tokens(&w.proposal_vault_at(&sponsor(), &PCID)), TOTAL);
+    expect_refused(
+        approve(&mut svm, &w, &Role::Curator.keypair(), PCID),
+        EscrowError::RulesNotSet,
+        "an approval before the rules are set",
+    );
+
+    // An hour later the curator sets the rules: the hash alone changes, nothing moves.
+    svm.set_time(NOW + HOUR);
+    let proposal_lamports = svm.lamports(&proposal_key);
+    let curator_lamports = svm.lamports(&Role::Curator.pubkey());
+    let sent = expect_ok(
+        set_rules(&mut svm, &w, &Role::Curator.keypair(), PCID, support::RULES),
+        "set_proposal_rules",
+    );
+    let set = sent.event::<ProposalRulesSet>();
+    assert_eq!(
+        (
+            set.proposal,
+            set.sponsor,
+            set.competition_id,
+            set.rules_sha256
+        ),
+        (proposal_key, sponsor(), PCID, support::RULES)
+    );
+    let ruled = EscrowTerms {
+        rules_sha256: support::RULES,
+        ..terms.clone()
+    };
+    assert_eq!(
+        w.proposal_state(&svm, &sponsor(), &PCID).unwrap(),
+        Proposal {
+            terms: ruled.clone(),
+            ..submitted
+        },
+        "only the rules hash changes"
+    );
+    assert_eq!(svm.lamports(&proposal_key), proposal_lamports);
+    assert_eq!(
+        svm.lamports(&Role::Curator.pubkey()),
+        curator_lamports,
+        "the curator pays nothing"
+    );
+    assert_eq!(svm.tokens(&w.proposal_vault_at(&sponsor(), &PCID)), TOTAL);
+    let config = w.config(&svm);
+    assert_eq!((config.open_value, config.pending_value), (0, TOTAL));
+
+    // Set once: neither the same hash nor another is written again.
+    for (again, label) in [
+        (support::RULES, "the same hash again"),
+        ([0x9a; 32], "another hash"),
+    ] {
+        expect_refused(
+            set_rules(&mut svm, &w, &Role::Curator.keypair(), PCID, again),
+            EscrowError::RulesAlreadySet,
+            label,
+        );
+    }
+    assert_eq!(
+        w.proposal_state(&svm, &sponsor(), &PCID)
+            .unwrap()
+            .terms
+            .rules_sha256,
+        support::RULES
+    );
+
+    // The approval opens, with the set hash, the escrow the twin opens directly at that moment.
+    svm.set_time(NOW + 2 * HOUR);
+    twin.set_time(NOW + 2 * HOUR);
+    let approved = expect_ok(
+        approve(&mut svm, &w, &Role::Curator.keypair(), PCID),
+        "approve_proposal",
+    );
+    let open = w.open_ix_at(sponsor(), w.funding, w.mint, PCID, &ruled);
+    let direct = expect_ok(
+        w.send(&mut twin, open, &[&Role::Sponsor.keypair()]),
+        "open_escrow",
+    );
+    let via_proposal = w.escrow_state_at(&svm, &sponsor(), &PCID).unwrap();
+    assert_eq!(
+        via_proposal,
+        w.escrow_state_at(&twin, &sponsor(), &PCID).unwrap(),
+        "the escrow is field for field open_escrow's, the set hash its rules"
+    );
+    assert_eq!(via_proposal.status, EscrowStatus::Open);
+    assert_eq!(opened_payload(&approved), opened_payload(&direct));
+    assert!(w.proposal_state(&svm, &sponsor(), &PCID).is_none());
+    assert_eq!(svm.tokens(&w.escrow_vault_at(&sponsor(), &PCID)), TOTAL);
+}
+
+/// The hash is written once and never over one the sponsor submitted, and the write is a real
+/// one: an all-zero argument is refused.
+#[test]
+fn the_rules_are_set_once_never_over_a_submitted_hash() {
+    let (mut svm, w) = world();
+    expect_ok(submit(&mut svm, &w, PCID), "submit_proposal, with rules");
+    let submitted = w.proposal_state(&svm, &sponsor(), &PCID).unwrap();
+    assert_ne!(submitted.terms.rules_sha256, [0; 32]);
+    expect_refused(
+        set_rules(&mut svm, &w, &Role::Curator.keypair(), PCID, [0x9a; 32]),
+        EscrowError::RulesAlreadySet,
+        "a set over the submitted hash",
+    );
+    assert_eq!(
+        w.proposal_state(&svm, &sponsor(), &PCID).unwrap(),
+        submitted
+    );
+
+    submit_unruled(&mut svm, &w, OTHER);
+    expect_refused(
+        set_rules(&mut svm, &w, &Role::Curator.keypair(), OTHER, [0; 32]),
+        EscrowError::RulesNotSet,
+        "an all-zero hash",
+    );
+    expect_ok(
+        set_rules(
+            &mut svm,
+            &w,
+            &Role::Curator.keypair(),
+            OTHER,
+            support::RULES,
+        ),
+        "set_proposal_rules",
+    );
+    expect_refused(
+        set_rules(&mut svm, &w, &Role::Curator.keypair(), OTHER, [0x9a; 32]),
+        EscrowError::RulesAlreadySet,
+        "a second set",
+    );
+}
+
+/// Only the curator of the day sets the rules: not the sponsor, the admin or a stranger, not a
+/// revoked curator, not a replaced one, and nobody while proposals are off.
+#[test]
+fn only_the_curator_of_the_day_sets_the_rules() {
+    let (mut svm, w) = world();
+    submit_unruled(&mut svm, &w, PCID);
+    for (by, label) in [
+        (Role::Sponsor.keypair(), "the sponsor"),
+        (Role::Admin.keypair(), "the admin"),
+        (Role::Attacker(0).keypair(), "a stranger"),
+    ] {
+        expect_refused(
+            set_rules(&mut svm, &w, &by, PCID, support::RULES),
+            EscrowError::UnauthorizedCurator,
+            label,
+        );
+    }
+
+    let curator = Role::Curator.keypair();
+    let revoke = w.set_revoked_ix(Role::Guardian.pubkey(), curator.pubkey(), true);
+    expect_ok(
+        w.send(&mut svm, revoke, &[&Role::Guardian.keypair()]),
+        "revoke the curator",
+    );
+    expect_refused(
+        set_rules(&mut svm, &w, &curator, PCID, support::RULES),
+        EscrowError::KeyRevoked,
+        "a revoked curator",
+    );
+    let unrevoke = w.set_revoked_ix(Role::Admin.pubkey(), curator.pubkey(), false);
+    expect_ok(
+        w.send(&mut svm, unrevoke, &[&Role::Admin.keypair()]),
+        "unrevoke",
+    );
+
+    let off = w.set_proposal_policy_ix(Role::Admin.pubkey(), Pubkey::default(), PENDING_CAP);
+    let mut disabled = svm.clone();
+    expect_ok(
+        w.send(&mut disabled, off, &[&Role::Admin.keypair()]),
+        "proposals off",
+    );
+    expect_refused(
+        set_rules(&mut disabled, &w, &curator, PCID, support::RULES),
+        EscrowError::ProposalsDisabled,
+        "a set while proposals are off",
+    );
+
+    let successor = Role::Spare(0).keypair();
+    let policy = w.set_proposal_policy_ix(Role::Admin.pubkey(), successor.pubkey(), PENDING_CAP);
+    expect_ok(
+        w.send(&mut svm, policy, &[&Role::Admin.keypair()]),
+        "replace the curator",
+    );
+    expect_refused(
+        set_rules(&mut svm, &w, &curator, PCID, support::RULES),
+        EscrowError::UnauthorizedCurator,
+        "the old curator",
+    );
+    let sent = expect_ok(
+        set_rules(&mut svm, &w, &successor, PCID, support::RULES),
+        "the new curator's set",
+    );
+    assert_eq!(
+        sent.event::<ProposalRulesSet>().rules_sha256,
+        support::RULES
+    );
+}
+
+/// The rules are set inside the review, as the approval is: at review_deadline still, after it
+/// never (ReviewWindowClosed), and the deposit then goes back as any expiry's does.
+#[test]
+fn the_rules_are_set_by_the_review_deadline() {
+    let (mut svm, w) = world();
+    let (_, _, review_deadline) = plan();
+    submit_unruled(&mut svm, &w, PCID);
+
+    let mut at_deadline = svm.clone();
+    at_deadline.set_time(review_deadline);
+    expect_ok(
+        set_rules(
+            &mut at_deadline,
+            &w,
+            &Role::Curator.keypair(),
+            PCID,
+            support::RULES,
+        ),
+        "a set at review_deadline",
+    );
+
+    svm.set_time(review_deadline + 1);
+    expect_refused(
+        set_rules(&mut svm, &w, &Role::Curator.keypair(), PCID, support::RULES),
+        EscrowError::ReviewWindowClosed,
+        "a set after review_deadline",
+    );
+    assert_eq!(
+        w.proposal_state(&svm, &sponsor(), &PCID)
+            .unwrap()
+            .terms
+            .rules_sha256,
+        [0; 32]
+    );
+    expect_ok(
+        close(&mut svm, &w, &Role::Attacker(0).keypair(), PCID, NO_REASON),
+        "the expiry",
+    );
+    assert_eq!(svm.tokens(&w.ata(&sponsor())), TOTAL);
+}
+
+/// The rules wait on what the approval waits on: IntakeStop and PayoutStop both refuse the set
+/// (IntakeStopped), and a held sponsor's proposal gets none (SponsorRevoked).
+#[test]
+fn the_rules_wait_on_the_stop_and_the_hold_as_the_approval_does() {
+    let (mut svm, w) = world();
+    submit_unruled(&mut svm, &w, PCID);
+
+    for stop in [StopState::IntakeStop, StopState::PayoutStop] {
+        let mut stopped = svm.clone();
+        let ix = w.set_stop_ix(Role::Guardian.pubkey(), stop);
+        expect_ok(
+            w.send(&mut stopped, ix, &[&Role::Guardian.keypair()]),
+            "the stop",
+        );
+        expect_refused(
+            set_rules(
+                &mut stopped,
+                &w,
+                &Role::Curator.keypair(),
+                PCID,
+                support::RULES,
+            ),
+            EscrowError::IntakeStopped,
+            "a set under the stop",
+        );
+    }
+
+    let mut held = svm.clone();
+    let revoke = w.set_revoked_ix(Role::Guardian.pubkey(), sponsor(), true);
+    expect_ok(
+        w.send(&mut held, revoke, &[&Role::Guardian.keypair()]),
+        "the guardian's hold",
+    );
+    expect_refused(
+        set_rules(
+            &mut held,
+            &w,
+            &Role::Curator.keypair(),
+            PCID,
+            support::RULES,
+        ),
+        EscrowError::SponsorRevoked,
+        "a held sponsor's proposal",
+    );
+
+    expect_ok(
+        set_rules(&mut svm, &w, &Role::Curator.keypair(), PCID, support::RULES),
+        "set_proposal_rules, nothing stopped or held",
     );
 }

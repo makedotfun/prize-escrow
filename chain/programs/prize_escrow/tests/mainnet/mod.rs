@@ -49,6 +49,10 @@ pub struct Pin {
     /// The Agave release the RPC node ran, and its feature-set id (getVersion).
     pub solana_core: String,
     pub feature_set_id: u32,
+    /// The agave-feature-set version whose feature list hashes to `feature_set_id`: the release
+    /// itself, or a later patch of its line when the node's build is ahead of its version string
+    /// (mainnet's 4.4.0 RPCs ran 4.4.1's list). None in a pin written before it was recorded.
+    pub feature_list: Option<String>,
     pub rent: Rent,
     pub active: Vec<Feature>,
     /// Queued for the next epoch boundary when the pin was read: not active, so not in `svm()`.
@@ -114,6 +118,9 @@ pub fn pin() -> &'static Pin {
             solana_core: str_of(release, "solanaCore"),
             feature_set_id: u32::try_from(u64_of(release, "featureSet"))
                 .expect("tests/mainnet/features.json: featureSet is not a u32"),
+            feature_list: release
+                .get("featureList")
+                .map(|_| str_of(release, "featureList")),
             rent: Rent {
                 lamports_per_byte: u64_of(rent, "lamportsPerByte"),
                 exemption_threshold: field(rent, "exemptionThreshold")

@@ -59,10 +59,10 @@
       "name": "approve_proposal",
       "docs": [
         "The curator, by review_deadline, opens the proposal's escrow with its stored terms (no",
-        "arguments: nothing can change) through open_escrow's own init, moves the deposit into the",
-        "escrow vault (any extra tokens swept after it), and closes the proposal and its vault, their",
-        "rent to the sponsor. The terms are held to today's Config again, the escrow to today's",
-        "per-escrow cap."
+        "arguments: only set_proposal_rules writes them, once) through open_escrow's own init, moves",
+        "the deposit into the escrow vault (any extra tokens swept after it), and closes the proposal",
+        "and its vault, their rent to the sponsor. The terms are held to today's Config again, the",
+        "escrow to today's per-escrow cap; an all-zero rules hash is refused (RulesNotSet)."
       ],
       "discriminator": [
         136,
@@ -3518,7 +3518,8 @@
       "name": "set_allowed",
       "docs": [
         "The admin adds a key to an allowlist (mints, sponsors, the regrader registry) or takes it",
-        "off."
+        "off. `house` marks a house regrader, or a house sponsor, whose escrows may open with any",
+        "challenge window from 0; on a sponsor already listed, `allowed` sets its mark alone."
       ],
       "discriminator": [
         172,
@@ -3928,6 +3929,104 @@
       ]
     },
     {
+      "name": "set_proposal_rules",
+      "docs": [
+        "The curator, by review_deadline, writes the rules hash of a proposal submitted with an",
+        "all-zero one into its stored terms, once and non-zero. Nothing else changes."
+      ],
+      "discriminator": [
+        62,
+        19,
+        82,
+        2,
+        164,
+        185,
+        216,
+        220
+      ],
+      "accounts": [
+        {
+          "name": "curator",
+          "docs": [
+            "The Config's curator (checked in the handler)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "proposal",
+          "docs": [
+            "Its terms.rules_sha256 is written; nothing else changes."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  112,
+                  111,
+                  115,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "proposal.sponsor",
+                "account": "Proposal"
+              },
+              {
+                "kind": "account",
+                "path": "proposal.competition_id",
+                "account": "Proposal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The curator, the stop and the revocation list."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "rules_sha256",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "set_revoked",
       "docs": [
         "The guardian revokes a key (refused everywhere after); the admin unrevokes it."
@@ -4191,7 +4290,8 @@
         "proposal's own bounds (the sponsor not the curator, neither the resolver nor the compliance",
         "key the sponsor or the curator, a resolve window of at least MIN_RESOLVE_WINDOW, a bond of",
         "at most MAX_PROPOSAL_BOND), the per-escrow cap, the pending cap and the global cap. No",
-        "escrow may exist at the id."
+        "escrow may exist at the id. `terms.rules_sha256` may be all zero: the curator then sets it",
+        "with set_proposal_rules before approving."
       ],
       "discriminator": [
         224,
@@ -4802,6 +4902,19 @@
         55,
         97,
         27
+      ]
+    },
+    {
+      "name": "ProposalRulesSet",
+      "discriminator": [
+        113,
+        46,
+        121,
+        74,
+        139,
+        176,
+        186,
+        147
       ]
     },
     {
@@ -5489,6 +5602,16 @@
       "code": 6115,
       "name": "EscrowsOutstanding",
       "msg": "The config still counts an escrow not closed"
+    },
+    {
+      "code": 6116,
+      "name": "RulesNotSet",
+      "msg": "The proposal's rules hash is all zero: the curator sets it before approving"
+    },
+    {
+      "code": 6117,
+      "name": "RulesAlreadySet",
+      "msg": "The proposal's rules hash is already set: it is written once"
     }
   ],
   "types": [
@@ -6543,11 +6666,13 @@
             "name": "curator",
             "docs": [
               "The key that co-signs a sponsor's submit_proposal (after the house screened the sponsor)",
-              "and approves the proposal as submitted or rejects it back to the sponsor, and nothing else:",
-              "it never sponsors a proposal, nor is a proposal's resolver or compliance key",
-              "(Config::check_proposal_terms). Pubkey::default() (what Config::new writes, and what a Config created before the field",
-              "existed reads, its reserved bytes zero) turns proposals off: submit_proposal and",
-              "approve_proposal refuse (ProposalsDisabled); the sponsor's and anyone's exits stay open."
+              "and approves the proposal as submitted (setting its rules hash first if the submit left it",
+              "all zero) or rejects it back to the sponsor, and nothing else: it never sponsors a proposal,",
+              "nor is a proposal's resolver or compliance key (Config::check_proposal_terms).",
+              "Pubkey::default() (what Config::new writes, and what a Config created before the field",
+              "existed reads, its reserved bytes zero) turns proposals off: submit_proposal,",
+              "set_proposal_rules and approve_proposal refuse (ProposalsDisabled); the sponsor's and",
+              "anyone's exits stay open."
             ],
             "type": "pubkey"
           },
@@ -6587,16 +6712,31 @@
             "type": "u32"
           },
           {
+            "name": "house_sponsors",
+            "docs": [
+              "The house sponsors: bit i set marks sponsors[i] as the house's own (MAX_SPONSORS is 32, one",
+              "bit each; every bit at or above sponsors.len() is clear). An escrow a house sponsor opens",
+              "may take any challenge window from 0 (open_escrow; Config::is_house_sponsor): neither",
+              "MIN_CHALLENGE_WINDOW nor min_challenge_window holds it, and every other bound does. The",
+              "admin marks and unmarks a listed sponsor with set_allowed(Sponsor, key, true, house), and",
+              "taking a sponsor off the list moves the bits above it down with it",
+              "(Config::without_bit). A Config written before the field reads 0 (its reserved bytes",
+              "zero): no house sponsor."
+            ],
+            "type": "u32"
+          },
+          {
             "name": "reserved",
             "docs": [
               "Zeroed room for later fields. min_regraders took the first of the 64 bytes this held,",
-              "curator, pending_value and pending_cap the next 48, and retired and live_escrows the next",
-              "5, so every offset before it and Config::SPACE stayed as they were."
+              "curator, pending_value and pending_cap the next 48, retired and live_escrows the next 5,",
+              "and house_sponsors the next 4, so every offset before it and Config::SPACE stayed as they",
+              "were."
             ],
             "type": {
               "array": [
                 "u8",
-                10
+                6
               ]
             }
           }
@@ -6700,7 +6840,8 @@
           {
             "name": "house",
             "docs": [
-              "The regrader's house flag (Allowed of a regrader); false otherwise."
+              "The house flag of an Allowed regrader or sponsor (a house sponsor's escrows may open with",
+              "no challenge window); false otherwise."
             ],
             "type": "bool"
           },
@@ -7752,7 +7893,8 @@
           {
             "name": "challenge_window",
             "docs": [
-              "Seconds a posted result stays challengeable (at least MIN_CHALLENGE_WINDOW)."
+              "Seconds a posted result stays challengeable (at least MIN_CHALLENGE_WINDOW; from 0 when a",
+              "house sponsor opens the escrow: EscrowTerms::validate_for_sponsor)."
             ],
             "type": "i64"
           },
@@ -8032,7 +8174,8 @@
           {
             "name": "terms",
             "docs": [
-              "The escrow's terms, stored whole: approve_proposal opens the escrow with exactly these."
+              "The escrow's terms, stored whole: approve_proposal opens the escrow with exactly these.",
+              "set_proposal_rules writes rules_sha256 once if the submit left it all zero."
             ],
             "type": {
               "defined": {
@@ -8219,6 +8362,44 @@
               "(Expired)."
             ],
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProposalRulesSet",
+      "docs": [
+        "set_proposal_rules: the curator wrote the rules hash of a proposal submitted without one into",
+        "its stored terms, the hash its approval opens the escrow with."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposal",
+            "type": "pubkey"
+          },
+          {
+            "name": "sponsor",
+            "type": "pubkey"
+          },
+          {
+            "name": "competition_id",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
+            "name": "rules_sha256",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
       }
@@ -8996,20 +9177,20 @@
     {
       "name": "MIN_ATTEST_WINDOW",
       "docs": [
-        "The shortest attestation window open_escrow accepts, in seconds: 48 h (60 s under",
+        "The shortest attestation window open_escrow accepts, in seconds: 24 h (60 s under",
         "`test-windows`)."
       ],
       "type": "i64",
-      "value": "172800"
+      "value": "86400"
     },
     {
       "name": "MIN_CHALLENGE_WINDOW",
       "docs": [
-        "The shortest challenge window open_escrow accepts, in seconds: 72 h. The `test-windows`",
+        "The shortest challenge window open_escrow accepts, in seconds: 24 h. The `test-windows`",
         "feature (localnet and devnet builds only) lowers it to 60 s."
       ],
       "type": "i64",
-      "value": "259200"
+      "value": "86400"
     },
     {
       "name": "MIN_CLAIM_WINDOW",
@@ -9024,11 +9205,11 @@
     {
       "name": "MIN_HOLD_WINDOW",
       "docs": [
-        "The shortest compliance hold window open_escrow accepts, in seconds: 72 h (60 s under",
+        "The shortest compliance hold window open_escrow accepts, in seconds: 24 h (60 s under",
         "`test-windows`). A requested claim with no on-chain hold clears once it passes."
       ],
       "type": "i64",
-      "value": "259200"
+      "value": "86400"
     },
     {
       "name": "MIN_RESOLVE_WINDOW",

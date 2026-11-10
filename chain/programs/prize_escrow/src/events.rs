@@ -326,7 +326,8 @@ pub enum ConfigChange {
     LimitsSet,
     /// set_floors wrote the window floors and the reveal grace.
     FloorsSet,
-    /// set_allowed added `key` to `list` (with `house` for a regrader).
+    /// set_allowed added `key` to `list` (with `house` for a regrader or a sponsor), or marked or
+    /// unmarked a sponsor already listed as a house sponsor (`house`).
     Allowed,
     /// set_allowed took `key` off `list`.
     Disallowed,
@@ -351,7 +352,8 @@ pub struct ConfigChanged {
     pub key: Pubkey,
     /// The list it edits (Allowed, Disallowed); None otherwise.
     pub list: Option<AllowList>,
-    /// The regrader's house flag (Allowed of a regrader); false otherwise.
+    /// The house flag of an Allowed regrader or sponsor (a house sponsor's escrows may open with
+    /// no challenge window); false otherwise.
     pub house: bool,
     pub admin: Pubkey,
     pub pending_admin: Pubkey,
@@ -509,6 +511,16 @@ pub struct ProposalApproved {
     /// Config.pending_value and open_value after it.
     pub pending_value: u64,
     pub open_value: u64,
+}
+
+/// set_proposal_rules: the curator wrote the rules hash of a proposal submitted without one into
+/// its stored terms, the hash its approval opens the escrow with.
+#[event]
+pub struct ProposalRulesSet {
+    pub proposal: Pubkey,
+    pub sponsor: Pubkey,
+    pub competition_id: [u8; 16],
+    pub rules_sha256: [u8; 32],
 }
 
 /// close_proposal: the proposal vault was swept to the sponsor's associated token account, and

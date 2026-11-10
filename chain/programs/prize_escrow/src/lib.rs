@@ -109,7 +109,8 @@ pub mod prize_escrow {
     }
 
     /// The admin adds a key to an allowlist (mints, sponsors, the regrader registry) or takes it
-    /// off.
+    /// off. `house` marks a house regrader, or a house sponsor, whose escrows may open with any
+    /// challenge window from 0; on a sponsor already listed, `allowed` sets its mark alone.
     pub fn set_allowed(
         ctx: Context<AdminConfig>,
         list: AllowList,
@@ -208,7 +209,8 @@ pub mod prize_escrow {
     /// proposal's own bounds (the sponsor not the curator, neither the resolver nor the compliance
     /// key the sponsor or the curator, a resolve window of at least MIN_RESOLVE_WINDOW, a bond of
     /// at most MAX_PROPOSAL_BOND), the per-escrow cap, the pending cap and the global cap. No
-    /// escrow may exist at the id.
+    /// escrow may exist at the id. `terms.rules_sha256` may be all zero: the curator then sets it
+    /// with set_proposal_rules before approving.
     pub fn submit_proposal(
         ctx: Context<SubmitProposal>,
         competition_id: [u8; 16],
@@ -225,11 +227,20 @@ pub mod prize_escrow {
         )
     }
 
+    /// The curator, by review_deadline, writes the rules hash of a proposal submitted with an
+    /// all-zero one into its stored terms, once and non-zero. Nothing else changes.
+    pub fn set_proposal_rules(
+        ctx: Context<SetProposalRules>,
+        rules_sha256: [u8; 32],
+    ) -> Result<()> {
+        instructions::set_proposal_rules::handle_set_proposal_rules(ctx, rules_sha256)
+    }
+
     /// The curator, by review_deadline, opens the proposal's escrow with its stored terms (no
-    /// arguments: nothing can change) through open_escrow's own init, moves the deposit into the
-    /// escrow vault (any extra tokens swept after it), and closes the proposal and its vault, their
-    /// rent to the sponsor. The terms are held to today's Config again, the escrow to today's
-    /// per-escrow cap.
+    /// arguments: only set_proposal_rules writes them, once) through open_escrow's own init, moves
+    /// the deposit into the escrow vault (any extra tokens swept after it), and closes the proposal
+    /// and its vault, their rent to the sponsor. The terms are held to today's Config again, the
+    /// escrow to today's per-escrow cap; an all-zero rules hash is refused (RulesNotSet).
     pub fn approve_proposal(ctx: Context<ApproveProposal>) -> Result<()> {
         instructions::approve_proposal::handle_approve_proposal(ctx)
     }

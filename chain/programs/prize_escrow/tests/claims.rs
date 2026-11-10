@@ -10,7 +10,7 @@
 //!
 //! The LiteSVM escrows go through the real open_escrow, commit_entries, post_result and settle
 //! (no state is written by hand), so each claim runs against a Claimable escrow at the release
-//! constants' 72 h challenge and hold windows. Time moves by rewriting the Clock sysvar. Winners
+//! constants' 24 h challenge and hold windows. Time moves by rewriting the Clock sysvar. Winners
 //! hold no SOL at all: a separate payer (or the compliance key) pays every fee and rent.
 //!
 //! Two of run review 3's regressions end in claims, so they live here: a self-paying payout root
@@ -100,8 +100,8 @@ const CLAIM_WINDOW: i64 = 30 * DAY;
 const HARD_DEADLINE: i64 = NOW + 365 * DAY;
 /// post_result runs as the final phase ends.
 const POST_AT: i64 = FINAL_END;
-/// settle runs as the 72 h challenge window ends: the escrow is Claimable from here.
-const CLAIMABLE_AT: i64 = POST_AT + 72 * HOUR;
+/// settle runs as the 24 h challenge window ends: the escrow is Claimable from here.
+const CLAIMABLE_AT: i64 = POST_AT + 24 * HOUR;
 const CLAIM_DEADLINE: i64 = CLAIMABLE_AT + CLAIM_WINDOW;
 
 const ENTRIES_ROOT: [u8; 32] = [0xe5; 32];
@@ -1493,8 +1493,8 @@ fn a_late_arbiter_resolve_keeps_its_claims_live_past_the_hard_deadline() {
     cl.post(root);
     cl.at(POST_AT + HOUR);
     ok(cl.challenge(ALT, [0xa7; 32], TOTAL), "challenge");
-    // The attest deadline: a whole 48 h attest window past the 72 h challenge window.
-    cl.at(CLAIMABLE_AT + 48 * HOUR);
+    // The attest deadline: a whole 24 h attest window past the 24 h challenge window.
+    cl.at(CLAIMABLE_AT + 24 * HOUR);
     ok(cl.settle_disputed(), "settle with no votes");
     assert_eq!(cl.state().status, EscrowStatus::Frozen);
 
@@ -1573,7 +1573,7 @@ fn without_the_cosignature_a_claim_waits_out_the_hold_window_after_a_request() {
         })
     );
     let requested = event::<ClaimRequested>(&meta);
-    let clears_at = requested_at + 72 * HOUR;
+    let clears_at = requested_at + 24 * HOUR;
     assert_eq!(
         (
             requested.escrow,

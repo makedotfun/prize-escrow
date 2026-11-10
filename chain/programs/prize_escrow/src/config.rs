@@ -7,7 +7,7 @@
 //! - G(t), the global stopped seconds up to wall time t: Config.stopped_secs (every PayoutStop
 //!   that ended) plus the part of the PayoutStop in force that has elapsed by t (a stop lapses at
 //!   stop_expires_at). Only PayoutStop stops the clock; IntakeStop refuses only the deposits
-//!   (open_escrow, fund, submit_proposal) and approve_proposal.
+//!   (open_escrow, fund, submit_proposal), set_proposal_rules and approve_proposal.
 //! - Γ(t) = t - G(t), the global clock: it stands still while a PayoutStop is in force.
 //! - A freeze is measured on Γ: it began at Γ = freeze_since and lapses at Γ = freeze_until, so a
 //!   PayoutStop during a freeze also holds the freeze's own lapse back, and the escrow's frozen
@@ -53,12 +53,12 @@ use crate::{
 pub enum StopState {
     /// Nothing is stopped.
     Normal,
-    /// open_escrow, fund, submit_proposal and approve_proposal are refused (close_proposal is
-    /// not: a deposit always has its way back).
+    /// open_escrow, fund, submit_proposal, set_proposal_rules and approve_proposal are refused
+    /// (close_proposal is not: a deposit always has its way back).
     IntakeStop,
-    /// open_escrow, fund, submit_proposal and approve_proposal, and every payout (claim, refund,
-    /// settle, arbiter_resolve and close_proposal), are refused, and every escrow's clock stands
-    /// still.
+    /// open_escrow, fund, submit_proposal, set_proposal_rules and approve_proposal, and every
+    /// payout (claim, refund, settle, arbiter_resolve and close_proposal), are refused, and every
+    /// escrow's clock stands still.
     PayoutStop,
 }
 
@@ -232,11 +232,13 @@ pub struct Config {
     /// (every panel names at least one regrader), as 1 does.
     pub min_regraders: u8,
     /// The key that co-signs a sponsor's submit_proposal (after the house screened the sponsor)
-    /// and approves the proposal as submitted or rejects it back to the sponsor, and nothing else:
-    /// it never sponsors a proposal, nor is a proposal's resolver or compliance key
-    /// (Config::check_proposal_terms). Pubkey::default() (what Config::new writes, and what a Config created before the field
-    /// existed reads, its reserved bytes zero) turns proposals off: submit_proposal and
-    /// approve_proposal refuse (ProposalsDisabled); the sponsor's and anyone's exits stay open.
+    /// and approves the proposal as submitted (setting its rules hash first if the submit left it
+    /// all zero) or rejects it back to the sponsor, and nothing else: it never sponsors a proposal,
+    /// nor is a proposal's resolver or compliance key (Config::check_proposal_terms).
+    /// Pubkey::default() (what Config::new writes, and what a Config created before the field
+    /// existed reads, its reserved bytes zero) turns proposals off: submit_proposal,
+    /// set_proposal_rules and approve_proposal refuse (ProposalsDisabled); the sponsor's and
+    /// anyone's exits stay open.
     pub curator: Pubkey,
     /// What every proposal not yet approved or closed deposited (submit_proposal adds,
     /// approve_proposal moves it to open_value, close_proposal takes it away). It counts against
@@ -253,10 +255,20 @@ pub struct Config {
     /// add one, close_escrow takes one away (saturating, as a Config created before the field
     /// existed reads 0 with escrows already open). close_config needs it at 0.
     pub live_escrows: u32,
+    /// The house sponsors: bit i set marks sponsors[i] as the house's own (MAX_SPONSORS is 32, one
+    /// bit each; every bit at or above sponsors.len() is clear). An escrow a house sponsor opens
+    /// may take any challenge window from 0 (open_escrow; Config::is_house_sponsor): neither
+    /// MIN_CHALLENGE_WINDOW nor min_challenge_window holds it, and every other bound does. The
+    /// admin marks and unmarks a listed sponsor with set_allowed(Sponsor, key, true, house), and
+    /// taking a sponsor off the list moves the bits above it down with it
+    /// (Config::without_bit). A Config written before the field reads 0 (its reserved bytes
+    /// zero): no house sponsor.
+    pub house_sponsors: u32,
     /// Zeroed room for later fields. min_regraders took the first of the 64 bytes this held,
-    /// curator, pending_value and pending_cap the next 48, and retired and live_escrows the next
-    /// 5, so every offset before it and Config::SPACE stayed as they were.
-    pub reserved: [u8; 10],
+    /// curator, pending_value and pending_cap the next 48, retired and live_escrows the next 5,
+    /// and house_sponsors the next 4, so every offset before it and Config::SPACE stayed as they
+    /// were.
+    pub reserved: [u8; 6],
 }
 
 impl Config {
@@ -319,7 +331,8 @@ impl Config {
             pending_cap: 0,
             retired: false,
             live_escrows: 0,
-            reserved: [0; 10],
+            house_sponsors: 0,
+            reserved: [0; 6],
         };
         config.set_limits(&init.limits, now)?;
         config.flow_level = config.flow_capacity;
@@ -376,7 +389,8 @@ impl Config {
         Ok(())
     }
 
-    /// Adds `key` to `list` (AlreadyListed, ListFull, InvalidConfig for the default key).
+    /// Adds `key` to `list` (AlreadyListed, ListFull, InvalidConfig for the default key). `house`
+    /// marks a house regrader, or a house sponsor (its bit of house_sponsors); a mint has none.
     pub fn allow(&mut self, list: AllowList, key: Pubkey, house: bool) -> Result<()> {
         require!(key != Pubkey::default(), EscrowError::InvalidConfig);
         require!(!self.is_listed(list, &key), EscrowError::AlreadyListed);
@@ -388,6 +402,7 @@ impl Config {
             AllowList::Sponsor => {
                 require!(self.sponsors.len() < MAX_SPONSORS, EscrowError::ListFull);
                 self.sponsors.push(key);
+                self.set_house_bit(self.sponsors.len() - 1, house);
             }
             AllowList::Regrader => {
                 require!(self.regraders.len() < MAX_REGISTRY, EscrowError::ListFull);
@@ -397,15 +412,80 @@ impl Config {
         Ok(())
     }
 
-    /// Takes `key` off `list` (NotListed). Escrows already open keep what they named.
+    /// set_allowed's add: Config::allow, except for a sponsor already listed, which is not
+    /// refused: its house bit becomes `house` and nothing else changes (its place on the list,
+    /// every other sponsor's bit). A mint or a regrader already listed is still AlreadyListed.
+    pub fn allow_or_mark(&mut self, list: AllowList, key: Pubkey, house: bool) -> Result<()> {
+        if list == AllowList::Sponsor {
+            if let Some(index) = self.sponsor_index(&key) {
+                self.set_house_bit(index, house);
+                return Ok(());
+            }
+        }
+        self.allow(list, key, house)
+    }
+
+    /// Takes `key` off `list` (NotListed). Escrows already open keep what they named. A sponsor
+    /// taken off takes its house bit with it, and every sponsor after it keeps its own
+    /// (Config::without_bit: the list keeps its order, so each moves down one place, bit and all).
     pub fn disallow(&mut self, list: AllowList, key: Pubkey) -> Result<()> {
         require!(self.is_listed(list, &key), EscrowError::NotListed);
         match list {
             AllowList::Mint => self.mints.retain(|k| *k != key),
-            AllowList::Sponsor => self.sponsors.retain(|k| *k != key),
+            AllowList::Sponsor => {
+                let index = self.sponsor_index(&key).ok_or(EscrowError::NotListed)?;
+                self.sponsors.remove(index);
+                self.house_sponsors = Self::without_bit(self.house_sponsors, index);
+            }
             AllowList::Regrader => self.regraders.retain(|e| e.key != key),
         }
         Ok(())
+    }
+
+    /// Whether `key` is a listed sponsor the admin marked as the house's own: open_escrow then
+    /// waives the challenge window's minimums (EscrowTerms::validate_for_sponsor,
+    /// Config::check_terms_policy). Never true for a key off the sponsor list.
+    pub fn is_house_sponsor(&self, key: &Pubkey) -> bool {
+        self.sponsor_index(key)
+            .and_then(|index| u32::try_from(index).ok())
+            .and_then(|index| self.house_sponsors.checked_shr(index))
+            .is_some_and(|bits| bits & 1 == 1)
+    }
+
+    /// Where `key` sits on the sponsor list.
+    fn sponsor_index(&self, key: &Pubkey) -> Option<usize> {
+        self.sponsors.iter().position(|k| k == key)
+    }
+
+    /// Sets sponsors[index]'s house bit to `house` (an index past the 32 bits sets nothing:
+    /// MAX_SPONSORS never lets the list reach one).
+    fn set_house_bit(&mut self, index: usize, house: bool) {
+        let Some(bit) = u32::try_from(index)
+            .ok()
+            .and_then(|index| 1u32.checked_shl(index))
+        else {
+            return;
+        };
+        if house {
+            self.house_sponsors |= bit;
+        } else {
+            self.house_sponsors &= !bit;
+        }
+    }
+
+    /// `bits` with bit `index` taken out: the bits below it stay, every bit above it moves down
+    /// one place, and the top bit is clear (what disallow does to house_sponsors as the sponsor
+    /// list closes up behind the one it takes off). An index past 31 changes nothing.
+    pub fn without_bit(bits: u32, index: usize) -> u32 {
+        let Ok(index) = u32::try_from(index) else {
+            return bits;
+        };
+        if index >= u32::BITS {
+            return bits;
+        }
+        let below = bits & ((1u32 << index) - 1);
+        let above = bits.checked_shr(index + 1).unwrap_or(0) << index;
+        below | above
     }
 
     pub fn is_listed(&self, list: AllowList, key: &Pubkey) -> bool {
@@ -482,8 +562,8 @@ impl Config {
         };
     }
 
-    /// Refuses open_escrow, fund, submit_proposal and approve_proposal while IntakeStop or
-    /// PayoutStop is in force, and for good once the Config is retired.
+    /// Refuses open_escrow, fund, submit_proposal, set_proposal_rules and approve_proposal while
+    /// IntakeStop or PayoutStop is in force, and for good once the Config is retired.
     pub fn require_intake(&self, now: i64) -> Result<()> {
         require!(!self.retired, EscrowError::Retired);
         require!(
@@ -722,7 +802,9 @@ impl Config {
     /// `escrow` being opened (RoleIsEscrow: a PDA of this program that it never signs for, so
     /// post_result, holds and co-signatures could never land and every claim would clear unheld
     /// on the lapse path), the bond at least min_bond (BondBelowMin), each window at least its
-    /// floor (WindowBelowFloor), at least min_regraders regraders (PanelTooSmall), every regrader
+    /// floor (WindowBelowFloor; the challenge window's floor is waived when `sponsor_allowlisted`
+    /// and the sponsor is a house sponsor, Config::is_house_sponsor: open_escrow's house path,
+    /// which a proposal never takes), at least min_regraders regraders (PanelTooSmall), every regrader
     /// registered (RegraderNotRegistered), at most max_house_regraders of them the house's
     /// (TooManyHouseRegraders), no resolver or compliance key among them
     /// (RegraderNotIndependent), and no key revoked (KeyRevoked).
@@ -761,8 +843,13 @@ impl Config {
             terms.bond_lamports >= self.min_bond,
             EscrowError::BondBelowMin
         );
+        let challenge_floor = if sponsor_allowlisted && self.is_house_sponsor(sponsor) {
+            0
+        } else {
+            self.min_challenge_window
+        };
         for (window, floor) in [
-            (terms.challenge_window, self.min_challenge_window),
+            (terms.challenge_window, challenge_floor),
             (terms.attest_window, self.min_attest_window),
             (terms.hold_window, self.min_hold_window),
             (terms.claim_window, self.min_claim_window),
@@ -826,3 +913,7 @@ pub fn clocks(escrow: &Escrow, config: &Config) -> Result<(i64, i64)> {
 }
 
 const _: () = assert!(MAX_REVOKED > 0 && MAX_REGISTRY >= MAX_REGRADERS as usize);
+const _: () = assert!(
+    MAX_SPONSORS <= u32::BITS as usize,
+    "Config.house_sponsors holds one bit per sponsor"
+);

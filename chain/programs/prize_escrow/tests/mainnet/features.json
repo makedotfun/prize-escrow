@@ -2,10 +2,10 @@
   "comment": "Written by scripts/chain/feature-set.ts from the cluster; never edit it by hand. The prize_escrow tests build LiteSVM with exactly the active set (tests/mainnet/mod.rs).",
   "cluster": "mainnet",
   "rpc": "api.mainnet.solana.com",
-  "readAt": "2026-10-28T11:24:52Z",
-  "slot": 462458439,
-  "epoch": 1070,
-  "release": {"solanaCore":"4.3.2","featureSet":3383571666},
+  "readAt": "2026-11-10T20:19:47Z",
+  "slot": 467852475,
+  "epoch": 1082,
+  "release": {"solanaCore":"4.4.0","featureSet":2681577653,"featureList":"4.4.1"},
   "rent": {"lamportsPerByte":5080,"exemptionThreshold":1,"burnPercent":50,"data":"d813000000000000000000000000f03f32"},
   "active": [
     {"id":"3h1BQWPDS5veRsq6mDBWruEpgPxRJkfwGexg5iiQ9mYg","slot":41040000,"retired":true},
@@ -318,7 +318,8 @@
     {"id":"txv1aq4pp281K9um3tnPgkfX8UqtFT6wcVW3hNezGLL","slot":447120000,"name":"enable_tx_v1","description":"SIMD-0385: Transaction V1"},
     {"id":"iBRLMc81UjRa8fn8A6eE8bJTnRbgQoPTynM51akENCV","slot":447552000,"name":"reduce_slot_time_to_250ms","description":"SIMD-0525: Reduce slot time to 250ms"},
     {"id":"iBRLjhJnkmDZgNoZRDMW11d8ZV7HvsL3vAyRjZB5npW","slot":454464000,"name":"reduce_slot_time_to_200ms","description":"SIMD-0525: Reduce slot time to 200ms"},
-    {"id":"A1pengvuM6JEcyNuTnMqepBKhwHE3N6PmUrdATGawhJS","slot":459648000,"name":"alpenglow","description":"SIMD-0326: Alpenglow: new consensus algorithm"}
+    {"id":"A1pengvuM6JEcyNuTnMqepBKhwHE3N6PmUrdATGawhJS","slot":459648000,"name":"alpenglow","description":"SIMD-0326: Alpenglow: new consensus algorithm"},
+    {"id":"8whkDenELnfwYLirBc4Wb4H2Z1z5K7tiykpdxJS7cWg1","slot":466128000,"name":"loaderv3_programdata_size_floor","description":"Apply a minimum loaded data size to loader-v3 ProgramData accounts"}
   ],
   "pending": [
     {"id":"2SLL2KLakB83YAnF1TwFb1hpycrWeHAfHYyLhwk2JRGn","unknown":true},

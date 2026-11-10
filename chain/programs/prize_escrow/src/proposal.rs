@@ -2,8 +2,10 @@
 //!
 //! submit_proposal (the sponsor signs, the Config's curator co-signs once the house screened the
 //! sponsor) moves `terms.total` into the proposal vault and fixes the terms and the schedule for
-//! good. From there a proposal has exactly two ways out, and every one of them ends with the
-//! proposal and its vault closed:
+//! good, but for one write: a proposal submitted with an all-zero `terms.rules_sha256` gets its
+//! rules hash from the curator, once, with set_proposal_rules, and cannot be approved before
+//! (RulesNotSet). From there a proposal has exactly two ways out, and every one of them ends with
+//! the proposal and its vault closed:
 //! - approve_proposal (the curator): the escrow ["escrow", sponsor, competition_id] opens with the
 //!   stored terms (approve takes no arguments, so no term can change on the way) and the deposit
 //!   moves into its vault;
@@ -43,6 +45,7 @@ pub struct Proposal {
     pub sponsor: Pubkey,
     pub mint: Pubkey,
     /// The escrow's terms, stored whole: approve_proposal opens the escrow with exactly these.
+    /// set_proposal_rules writes rules_sha256 once if the submit left it all zero.
     pub terms: EscrowTerms,
     /// Unix seconds the competition opens: review_deadline <= opens_at < terms.entries_deadline.
     pub opens_at: i64,

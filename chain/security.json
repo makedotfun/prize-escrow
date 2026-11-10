@@ -1,5 +1,6 @@
 {
   "name": "make.fun prize escrow",
+  "logo": "https://raw.githubusercontent.com/makedotfun/.github/main/profile/assets/icon-512.png",
   "description": "make.fun prize escrow: a funded vault per competition, a bonded and challengeable result, k-of-n regrader attestations, an arbiter, and merkle self-claims",
   "project_url": "https://make.fun",
   "contacts": ["email:security@make.fun"],

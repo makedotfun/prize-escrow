@@ -80,16 +80,18 @@ pub struct ApproveProposal<'info> {
 }
 
 /// The curator approves the proposal as submitted: it takes no arguments, so no term can change
-/// on the way. Refused unless the signer is the Config's curator today (ProposalsDisabled,
+/// on the way (set_proposal_rules alone writes the stored terms: an all-zero rules hash, once).
+/// Refused unless the signer is the Config's curator today (ProposalsDisabled,
 /// UnauthorizedCurator, KeyRevoked: a replaced or revoked curator approves nothing), the review
 /// deadline has not passed (ReviewWindowClosed), intake runs (IntakeStopped), the sponsor is not
-/// revoked (SponsorRevoked: the hold), and the stored terms still pass EscrowTerms::validate,
-/// Config::check_terms_policy (the sponsor allowlist waived) and Config::check_proposal_terms
-/// against today's Config: a Config that drifted since the submit (a mint, a regrader or the
-/// arbiter changed, a floor raised, the sponsor or one of its roles named the curator) refuses the
-/// approval, and the curator rejects instead. The escrow it opens is held to today's per-escrow
-/// cap C_e (EscrowCapExceeded, Config::approve_pending), as every escrow opened is; C_g is not
-/// read again, since the deposit's room under it was taken at the submit.
+/// revoked (SponsorRevoked: the hold), the rules hash is set (RulesNotSet: a deposit submitted
+/// without one lists only after set_proposal_rules), and the stored terms still pass
+/// EscrowTerms::validate, Config::check_terms_policy (the sponsor allowlist waived) and
+/// Config::check_proposal_terms against today's Config: a Config that drifted since the submit (a
+/// mint, a regrader or the arbiter changed, a floor raised, the sponsor or one of its roles named
+/// the curator) refuses the approval, and the curator rejects instead. The escrow it opens is held
+/// to today's per-escrow cap C_e (EscrowCapExceeded, Config::approve_pending), as every escrow
+/// opened is; C_g is not read again, since the deposit's room under it was taken at the submit.
 ///
 /// The escrow opens through init_escrow, the helper open_escrow uses, so it is field for field
 /// the escrow open_escrow would have opened with the same terms at the same moment, Open. Exactly
@@ -120,6 +122,7 @@ pub fn handle_approve_proposal(ctx: Context<ApproveProposal>) -> Result<()> {
     require!(now <= review_deadline, EscrowError::ReviewWindowClosed);
     config.require_intake(now)?;
     require!(!config.is_revoked(&sponsor), EscrowError::SponsorRevoked);
+    require!(terms.rules_sha256 != [0; 32], EscrowError::RulesNotSet);
     terms.validate(now, bond_floor(&Rent::get()?))?;
     config.check_terms_policy(&sponsor, &mint, &escrow_key, &terms, false)?;
     config.check_proposal_terms(&sponsor, &terms)?;

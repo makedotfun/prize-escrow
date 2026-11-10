@@ -10,7 +10,7 @@
 //! shortens the admin's stop, and lamports sent to an unvoted seat's Attestation PDA never block
 //! its rotation (the refund of a dispute whose quorum is recorded is in tests/lifecycle.rs).
 //!
-//! Time moves by rewriting LiteSVM's Clock sysvar, so the real 72 h, 48 h and 7-day windows run.
+//! Time moves by rewriting LiteSVM's Clock sysvar, so the real 24 h and 7-day windows run.
 
 mod common;
 mod mainnet;
@@ -887,7 +887,7 @@ fn only_the_upgrade_authority_creates_the_config_and_only_once() {
         (prize_escrow::DEFAULT_MIN_REGRADERS, 1)
     );
     // No curator: proposals start off, nothing pending, no room for them; not retired, no escrow
-    // counted.
+    // counted; no house sponsor (initialize_config lists every sponsor unmarked).
     assert_eq!(
         (
             config.curator,
@@ -895,9 +895,10 @@ fn only_the_upgrade_authority_creates_the_config_and_only_once() {
             config.pending_cap,
             config.retired,
             config.live_escrows,
+            config.house_sponsors,
             config.reserved
         ),
-        (Pubkey::default(), 0, 0, false, 0, [0; 10])
+        (Pubkey::default(), 0, 0, false, 0, 0, [0; 6])
     );
     assert_eq!(
         s.svm.get_account(&config_pda()).unwrap().data.len(),

@@ -12,7 +12,9 @@
 //!   settle.rs's require_window_over;
 //! - panel.rs: Config::min_regraders, check_terms_policy's PanelTooSmall and set_min_regraders;
 //! - alternative.rs: Escrow::record_alternative and clear_alternative (arbiter_resolve keeping the
-//!   posted result).
+//!   posted result);
+//! - sponsors.rs: the house sponsors' bits, Config::without_bit (the re-pack disallow does),
+//!   and Config::disallow with is_house_sponsor on a whole list.
 //!
 //! oracle.rs is the hash model: what the hashing proofs assume of keccak256 and sha256 (no
 //! collision among the inputs a harness queries) and nothing more.
@@ -39,6 +41,8 @@ mod merkle;
 mod oracle;
 #[cfg(kani)]
 mod panel;
+#[cfg(kani)]
+mod sponsors;
 #[cfg(kani)]
 mod window;
 

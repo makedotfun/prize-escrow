@@ -88,7 +88,7 @@
   "mainnet": {
     "programId": "sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd",
     "build": "release",
-    "programSha256": "45434e9247c006c37bcf998b9ddbeb8b83c64f3b0e9863feebe1ed52e42c657d",
+    "programSha256": "941cb4cd4c8d2476cc865c7bc32c8debd0e8d9453871602d32487ee12ea9fec2",
     "upgradeAuthority": "2oyHAoA7m7owTCxTdrUrZe2zkGU7R7a1jwhRnhpJPiGw",
     "governance": "single-key",
     "config": "B6Zuh2vXHEVNBwr3bsndJdD9Z6e54TQVhjJj5GRUpfTC",

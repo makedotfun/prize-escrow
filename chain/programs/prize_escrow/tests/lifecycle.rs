@@ -3,8 +3,8 @@
 //! commit_entries, post_result, challenge, attest, settle, arbiter_resolve and refund, through
 //! every outcome and both sides of every deadline.
 //!
-//! Time moves by rewriting LiteSVM's Clock sysvar, so the real windows are exercised: the 72 h
-//! challenge window and the 48 h attestation window of the release constants, never the 60 s of
+//! Time moves by rewriting LiteSVM's Clock sysvar, so the real windows are exercised: the 24 h
+//! challenge window and the 24 h attestation window of the release constants, never the 60 s of
 //! the test-windows feature. Each test checks the escrow account, the token and lamport balances,
 //! and the event the instruction emits.
 //!
@@ -95,11 +95,11 @@ const HARD_DEADLINE: i64 = NOW + 365 * DAY;
 /// When the scenario helpers post the result (the final end itself), and then challenge it.
 const POST_AT: i64 = FINAL_END;
 const CHALLENGE_AT: i64 = POST_AT + HOUR;
-/// The challenge deadline of the result posted at POST_AT (the 72 h window): nothing settles before it.
-const CHALLENGE_DEADLINE: i64 = POST_AT + 72 * HOUR;
-/// The attest deadline once challenged: a whole 48 h attest window past the challenge deadline,
+/// The challenge deadline of the result posted at POST_AT (the 24 h window): nothing settles before it.
+const CHALLENGE_DEADLINE: i64 = POST_AT + 24 * HOUR;
+/// The attest deadline once challenged: a whole 24 h attest window past the challenge deadline,
 /// whenever the first challenge landed.
-const ATTEST_DEADLINE: i64 = CHALLENGE_DEADLINE + 48 * HOUR;
+const ATTEST_DEADLINE: i64 = CHALLENGE_DEADLINE + 24 * HOUR;
 
 const ENTRIES_ROOT: [u8; 32] = [0xe5; 32];
 const PAYOUT_ROOT: [u8; 32] = [0xa1; 32];
@@ -886,7 +886,7 @@ fn open_escrow_funds_the_vault_and_stores_the_terms() {
     assert_eq!(opened.rules_sha256, RULES);
     assert_eq!(opened.regraders, lc.terms.regraders);
     assert_eq!((opened.k, opened.bond_lamports), (2, BOND));
-    assert_eq!(opened.challenge_window, 72 * HOUR);
+    assert_eq!(opened.challenge_window, 24 * HOUR);
     assert_eq!(
         (
             opened.entries_deadline,
@@ -968,8 +968,8 @@ fn open_escrow_refuses_terms_outside_the_bounds() {
             EscrowError::InvalidRegraderSet,
         ),
         (
-            "a challenge window one second short of 72 h",
-            |t| t.challenge_window = 72 * HOUR - 1,
+            "a challenge window one second short of 24 h",
+            |t| t.challenge_window = 24 * HOUR - 1,
             EscrowError::InvalidWindow,
         ),
         ("a zero total", |t| t.total = 0, EscrowError::InvalidAmount),
@@ -1356,7 +1356,7 @@ fn post_result_holds_the_total_to_the_vault_and_takes_the_bond() {
     );
     assert_eq!((state.total, state.resolver_bond), (TOTAL, BOND));
     assert_eq!(state.commitment, posted_commitment());
-    assert_eq!(state.challenge_deadline, now + 72 * HOUR);
+    assert_eq!(state.challenge_deadline, now + 24 * HOUR);
     assert_eq!(state.entries_root, ENTRIES_ROOT);
 
     let posted = event::<ResultPosted>(&meta);
@@ -1368,7 +1368,7 @@ fn post_result_holds_the_total_to_the_vault_and_takes_the_bond() {
     );
     assert_eq!((posted.total, posted.resolver_bond), (TOTAL, BOND));
     assert_eq!(posted.commitment, posted_commitment());
-    assert_eq!(posted.challenge_deadline, now + 72 * HOUR);
+    assert_eq!(posted.challenge_deadline, now + 24 * HOUR);
 
     let r = lc.post(Who::Resolver, TOTAL);
     assert_refused(r, EscrowError::InvalidStatus, "a second post_result");
@@ -1420,12 +1420,12 @@ fn post_result_waits_for_the_final_end_and_the_entries_root() {
 // ------------------------------------------------------------- settle: the undisputed path
 
 #[test]
-fn an_unchallenged_result_becomes_claimable_after_the_72_hour_window() {
+fn an_unchallenged_result_becomes_claimable_after_the_24_hour_window() {
     let mut lc = Lc::committed();
     let resolver_before = lc.lamports(&lc.keys.key(Who::Resolver));
     lc.at(POST_AT);
     ok(lc.post(Who::Resolver, TOTAL), "post_result");
-    let window_end = POST_AT + 72 * HOUR;
+    let window_end = POST_AT + 24 * HOUR;
     assert_eq!(lc.state().challenge_deadline, window_end);
 
     lc.at(window_end - 1);
@@ -1492,9 +1492,9 @@ fn settle_refuses_an_open_escrow() {
 // ------------------------------------------------------------------------------- challenge
 
 #[test]
-fn challenge_bonds_an_alternative_and_opens_the_48_hour_attestation_window() {
+fn challenge_bonds_an_alternative_and_opens_the_24_hour_attestation_window() {
     let mut lc = Lc::posted();
-    let last_second = POST_AT + 72 * HOUR - 1;
+    let last_second = POST_AT + 24 * HOUR - 1;
     lc.at(last_second);
 
     let r = lc.challenge_committing(Who::Challenger, ALT, ALT_ROOT, TOTAL, junk_commitment());
@@ -1773,7 +1773,7 @@ fn the_posted_results_quorum_makes_it_claimable_and_the_resolver_takes_the_chall
     );
 
     // Run review 5 (F1): a quorum inside the challenge window settles nothing yet. A junk
-    // self-challenge the regraders answered at once must not cut the 72 h window short for the
+    // self-challenge the regraders answered at once must not cut the 24 h window short for the
     // challenger who has not spoken yet.
     lc.at(CHALLENGE_AT + HOUR);
     let r = lc.settle(false);
@@ -2217,7 +2217,7 @@ fn every_distinct_alternative_is_its_own_challenge_and_a_duplicate_is_refused() 
     assert_eq!(state.attest_deadline, attest_deadline);
 
     // The honest alternative still has its own slot, inside the challenge window, while Disputed.
-    let later = POST_AT + 72 * HOUR - 1;
+    let later = POST_AT + 24 * HOUR - 1;
     lc.at(later);
     let meta = ok(
         lc.challenge(Who::Challenger, ALT),
@@ -2261,7 +2261,7 @@ fn every_distinct_alternative_is_its_own_challenge_and_a_duplicate_is_refused() 
         EscrowError::InvalidResultHash,
         "a challenge committing to the posted result",
     );
-    lc.at(POST_AT + 72 * HOUR);
+    lc.at(POST_AT + 24 * HOUR);
     let r = lc.challenge(Who::Stranger, [0x99; 32]);
     assert_refused(
         r,
@@ -2653,10 +2653,10 @@ fn many_challenges_in_one_window_still_resolve_by_the_attest_deadline() {
     let opened_at = [
         CHALLENGE_AT,
         CHALLENGE_AT + HOUR,
-        POST_AT + 24 * HOUR,
-        POST_AT + 48 * HOUR,
-        POST_AT + 60 * HOUR,
-        POST_AT + 71 * HOUR,
+        POST_AT + 8 * HOUR,
+        POST_AT + 16 * HOUR,
+        POST_AT + 20 * HOUR,
+        POST_AT + 23 * HOUR,
         CHALLENGE_DEADLINE - 60,
         CHALLENGE_DEADLINE - 1,
     ];
@@ -2767,7 +2767,7 @@ fn refund_returns_the_whole_pot_when_no_result_comes_and_leaves_a_closed_marker(
 #[test]
 fn refund_of_a_claimable_escrow_waits_until_after_the_claim_deadline() {
     let mut lc = Lc::posted();
-    let window_end = POST_AT + 72 * HOUR;
+    let window_end = POST_AT + 24 * HOUR;
     lc.at(window_end);
     ok(lc.settle(false), "settle");
     let claim_deadline = window_end + CLAIM_WINDOW;

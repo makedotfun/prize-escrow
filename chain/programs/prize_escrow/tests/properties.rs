@@ -908,16 +908,23 @@ fn any_terms() -> impl Strategy<Value = (EscrowTerms, i64, u64)> {
     ]
 }
 
-/// EscrowTerms::validate's bounds, from its doc comment.
-fn valid(t: &EscrowTerms, now: i64, min_bond: u64) -> bool {
+/// EscrowTerms::validate's bounds, from its doc comment; with `house_sponsor`,
+/// validate_for_sponsor's: the challenge window from 0 instead of MIN_CHALLENGE_WINDOW, nothing
+/// else waived.
+fn valid(t: &EscrowTerms, now: i64, min_bond: u64, house_sponsor: bool) -> bool {
     let n = t.regraders.len();
     let distinct = t
         .regraders
         .iter()
         .enumerate()
         .all(|(i, r)| *r != Pubkey::default() && !t.regraders[..i].contains(r));
+    let min_challenge = if house_sponsor {
+        0
+    } else {
+        MIN_CHALLENGE_WINDOW
+    };
     let windows = [
-        (t.challenge_window, MIN_CHALLENGE_WINDOW),
+        (t.challenge_window, min_challenge),
         (t.attest_window, MIN_ATTEST_WINDOW),
         (t.hold_window, MIN_HOLD_WINDOW),
         (t.claim_window, MIN_CLAIM_WINDOW),
@@ -949,11 +956,24 @@ fn valid(t: &EscrowTerms, now: i64, min_bond: u64) -> bool {
 
 proptest! {
     /// validate accepts exactly the documented bounds and never panics (overflow included); a
-    /// quorum it accepts is a strict majority, so no two sides can both reach k.
+    /// quorum it accepts is a strict majority, so no two sides can both reach k. A house sponsor's
+    /// (validate_for_sponsor) accepts exactly the same bounds but the challenge window's minimum,
+    /// which is 0, and accepts everything validate accepts.
     #[test]
     fn terms_validate_accepts_exactly_the_documented_bounds((t, now, min_bond) in any_terms()) {
         let ok = t.validate(now, min_bond).is_ok();
-        prop_assert_eq!(ok, valid(&t, now, min_bond), "{:?}", t);
+        prop_assert_eq!(ok, valid(&t, now, min_bond, false), "{:?}", t);
+        prop_assert_eq!(t.validate_for_sponsor(now, min_bond, false).is_ok(), ok);
+        let house = t.validate_for_sponsor(now, min_bond, true);
+        prop_assert_eq!(house.is_ok(), valid(&t, now, min_bond, true), "house {:?}", t);
+        prop_assert!(!ok || house.is_ok(), "the house path refused what validate takes");
+        // Where both refuse, they refuse alike unless the challenge window is the one bound apart.
+        if let (Err(plain), Err(house)) = (t.validate(now, min_bond), house) {
+            prop_assert!(
+                code(plain) == code(house) || t.challenge_window < MIN_CHALLENGE_WINDOW,
+                "{:?}", t
+            );
+        }
         if ok {
             prop_assert!(2 * u16::from(t.k) > t.regraders.len() as u16);
         }
@@ -963,11 +983,12 @@ proptest! {
 // ----------------------------------------------------------------------------------- open policy
 
 prop_compose! {
-    /// A Config with mints from keys 1 to 3, sponsors 10 to 13, a registry of keys 1 to 9 (some the
-    /// house's), a minimum bond, floors and a few revoked keys.
+    /// A Config with mints from keys 1 to 3, sponsors 10 to 13 (some of them house sponsors), a
+    /// registry of keys 1 to 9 (some the house's), a minimum bond, floors and a few revoked keys.
     fn policy()(
         mints in prop::collection::btree_set(1u8..=3, 1..=3),
         sponsors in prop::collection::btree_set(10u8..=13, 1..=4),
+        house_sponsors in any::<u32>(),
         registry in prop::collection::btree_map(1u8..=9, any::<bool>(), 3..=9),
         revoked in prop::collection::btree_set(prop_oneof![1u8..=9, 10u8..=13, Just(30u8), Just(40u8)], 0..=3),
         min_bond in 0u64..=200_000_000,
@@ -977,6 +998,8 @@ prop_compose! {
         let mut config = config_at(1_800_000_000, Limits { min_bond, max_house_regraders: max_house, ..limits(1, 1) });
         config.mints = mints.into_iter().map(pk).collect();
         config.sponsors = sponsors.into_iter().map(pk).collect();
+        // One bit per listed sponsor, none above the list (set_allowed's invariant).
+        config.house_sponsors = house_sponsors & ((1u32 << config.sponsors.len()) - 1);
         config.regraders = registry.into_iter().map(|(b, house)| RegraderEntry { key: pk(b), house }).collect();
         config.revoked = revoked.into_iter().map(pk).collect();
         config.set_floors(&Floors {
@@ -1064,9 +1087,18 @@ prop_compose! {
     }
 }
 
+/// Whether `sponsor` holds a set bit of house_sponsors at its place on the sponsor list.
+fn marked_house(config: &Config, sponsor: &Pubkey) -> bool {
+    config
+        .sponsors
+        .iter()
+        .position(|s| s == sponsor)
+        .is_some_and(|i| (config.house_sponsors >> i) & 1 == 1)
+}
+
 /// Config::check_terms_policy's rules, from its doc comment (validate's are the program's other
 /// half): the sponsor allowlist only when `sponsor_allowlisted` (open_escrow), never for a
-/// proposal.
+/// proposal; the challenge window's floor waived for open_escrow's house sponsor alone.
 fn allowed(
     config: &Config,
     sponsor: &Pubkey,
@@ -1080,7 +1112,12 @@ fn allowed(
         .iter()
         .filter(|r| config.regraders.iter().any(|e| e.key == **r && e.house))
         .count();
-    let floors = t.challenge_window >= config.min_challenge_window
+    let challenge_floor = if sponsor_allowlisted && marked_house(config, sponsor) {
+        0
+    } else {
+        config.min_challenge_window
+    };
+    let floors = t.challenge_window >= challenge_floor
         && t.attest_window >= config.min_attest_window
         && t.hold_window >= config.min_hold_window
         && t.claim_window >= config.min_claim_window;
@@ -1110,9 +1147,10 @@ proptest! {
     /// sponsor allowed, refund_to the sponsor, the Config's arbiter, a compliance key, the minimum
     /// bond, every window at its floor, every regrader registered, the house within its allowance,
     /// the panel independent of the resolver and the compliance key, neither of those the escrow's
-    /// own address, and no key revoked. A proposal's check (sponsor_allowlisted false) accepts
-    /// exactly the same rules but the sponsor allowlist, and waives nothing else: every other
-    /// refusal stays, by the same error.
+    /// own address, and no key revoked; for a house sponsor, the challenge window from 0. A
+    /// proposal's check (sponsor_allowlisted false) accepts exactly the same rules but the sponsor
+    /// allowlist, never takes the house waiver, and waives nothing else: every other refusal
+    /// stays, by the same error.
     #[test]
     fn the_open_policy_accepts_exactly_its_rules((config, sponsor, mint, escrow, t) in policy_case()) {
         let open = config.check_terms_policy(&sponsor, &mint, &escrow, &t, true);
@@ -1128,12 +1166,23 @@ proptest! {
             "{:?}", t
         );
         // A refusal other than the allowlist's is the proposal's too, by the same error; behind
-        // SponsorNotAllowed the proposal meets the rules after it (allowed(.., false) above).
+        // SponsorNotAllowed the proposal meets the rules after it (allowed(.., false) above). The
+        // one rule open_escrow may waive that a proposal never does: a house sponsor's challenge
+        // window under the floor, which the proposal refuses by WindowBelowFloor.
         let waived = u32::from(EscrowError::SponsorNotAllowed);
+        let below_floor = u32::from(EscrowError::WindowBelowFloor);
+        let house_waived =
+            marked_house(&config, &sponsor) && t.challenge_window < config.min_challenge_window;
         match (open.map_err(code), proposal.map_err(code)) {
             (Err(e), Ok(())) => prop_assert_eq!(e, waived),
-            (Err(e), Err(p)) => prop_assert!(e == waived || e == p, "open {} but proposal {}", e, p),
-            (Ok(()), p) => prop_assert!(p.is_ok(), "a proposal refused what open_escrow takes"),
+            (Err(e), Err(p)) => prop_assert!(
+                e == waived || e == p || (house_waived && p == below_floor),
+                "open {} but proposal {}", e, p
+            ),
+            (Ok(()), p) => prop_assert!(
+                p.is_ok() || (house_waived && p == Err(below_floor)),
+                "a proposal refused what open_escrow takes"
+            ),
         }
     }
 }
@@ -1193,7 +1242,7 @@ fn the_generators_reach_both_sides() {
     let draws = 2_000;
     for _ in 0..draws {
         let (t, now, min_bond) = any_terms().new_tree(&mut runner).unwrap().current();
-        terms_ok += usize::from(valid(&t, now, min_bond));
+        terms_ok += usize::from(valid(&t, now, min_bond, false));
         let (config, sponsor, mint, escrow, t) =
             policy_case().new_tree(&mut runner).unwrap().current();
         policy_ok += usize::from(allowed(&config, &sponsor, &mint, &escrow, &t, true));

@@ -83,7 +83,7 @@ use {
 const REASON: [u8; 32] = [0x4e; 32];
 
 /// The longest wall time between two honest reactions: well inside every window (the shortest,
-/// the attest window, is 48 h).
+/// the challenge, attest and hold windows, are 24 h).
 pub const MAX_LATENCY: i64 = 12 * HOUR;
 
 /// The longest the adversary acts with no honest reaction since its last move: a minute, far

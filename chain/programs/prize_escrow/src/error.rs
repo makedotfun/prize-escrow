@@ -240,4 +240,8 @@ pub enum EscrowError {
     ValueOutstanding,
     #[msg("The config still counts an escrow not closed")]
     EscrowsOutstanding,
+    #[msg("The proposal's rules hash is all zero: the curator sets it before approving")]
+    RulesNotSet,
+    #[msg("The proposal's rules hash is already set: it is written once")]
+    RulesAlreadySet,
 }

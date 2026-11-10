@@ -71,7 +71,7 @@ pub const NOW: i64 = 1_800_000_000;
 pub const ENTRIES_DEADLINE: i64 = NOW + DAY;
 pub const FINAL_END: i64 = NOW + 2 * DAY;
 pub const RESOLVE_DEADLINE: i64 = NOW + 7 * DAY;
-/// The release minimums: 72 h to challenge, 48 h to attest, 72 h on hold, 7 days to claim.
+/// The release minimums: 24 h to challenge, 24 h to attest, 24 h on hold, 7 days to claim.
 pub const CHALLENGE_WINDOW: i64 = MIN_CHALLENGE_WINDOW;
 pub const ATTEST_WINDOW: i64 = MIN_ATTEST_WINDOW;
 pub const HOLD_WINDOW: i64 = MIN_HOLD_WINDOW;
