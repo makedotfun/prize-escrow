@@ -33,7 +33,7 @@ In the program's own words: a funded vault per competition, a bonded and challen
 | | |
 |---|---|
 | Program id | [`sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd`](https://explorer.solana.com/address/sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd) (mainnet and devnet) |
-| Mainnet build | release, SBPF v2, sha256 `45434e9247c006c37bcf998b9ddbeb8b83c64f3b0e9863feebe1ed52e42c657d` |
+| Mainnet build | release, SBPF v2, sha256 `941cb4cd4c8d2476cc865c7bc32c8debd0e8d9453871602d32487ee12ea9fec2` |
 | Config account | [`B6Zuh2vXHEVNBwr3bsndJdD9Z6e54TQVhjJj5GRUpfTC`](https://explorer.solana.com/address/B6Zuh2vXHEVNBwr3bsndJdD9Z6e54TQVhjJj5GRUpfTC) |
 | Prize token on mainnet | USDC, classic SPL Token program |
 | Framework | Anchor 1.2.1, Rust 1.97.1, Agave 3.1.10 |
@@ -74,7 +74,7 @@ flowchart TD
     L --> M
 ```
 
-The deadlines are fixed when the escrow opens and checked by the program. The release build refuses an escrow whose challenge window is under 72 hours, whose attest window is under 48 hours, whose compliance hold window is under 72 hours, or whose claim window is under 7 days. The Config can set higher floors. The backstop is `hard_deadline`, which must be at least the resolve deadline plus every window plus 7 more days: an escrow that nobody settled, or a dispute that nobody decided, can be refunded to the sponsor after it.
+The deadlines are fixed when the escrow opens and checked by the program. The release build refuses an escrow whose challenge window is under 72 hours, whose attest window is under 48 hours, whose compliance hold window is under 72 hours, or whose claim window is under 7 days. One exception: an escrow opened by a sponsor the admin has marked as a house sponsor may set any challenge window from 0 up, and neither the 72 hour minimum nor the Config's floor applies to it; its other three windows keep their floors. The Config can set higher floors. The backstop is `hard_deadline`, which must be at least the resolve deadline plus every window plus 7 more days: an escrow that nobody settled, or a dispute that nobody decided, can be refunded to the sponsor after it.
 
 ### Where the money can go
 
@@ -164,7 +164,7 @@ What each role can and cannot do, from the account constraints and checks in the
 | Role | Can | Cannot |
 |---|---|---|
 | **Upgrade authority** | Create the Config once (`initialize_config`). Upgrade or close the program through Solana's upgradeable loader. Co-sign `close_config`. | Nothing in the program limits an upgrade. No breaker stops one. |
-| **Admin** | Set caps, the claim flow limit, the minimum bond and the house-regrader allowance (`set_limits`); window floors (`set_floors`); the smallest panel (`set_min_regraders`); the mint, sponsor and regrader allowlists (`set_allowed`); the curator (`set_proposal_policy`); the guardian and arbiter (`set_config_role`). Lower or lift any breaker. Replace an escrow's resolver, compliance key or a regrader seat that has not voted (`rotate_role`). Retire the Config. Hand over admin in two steps. | Move tokens out of a vault. Change an open escrow's terms, total, deadlines, `refund_to` or posted result. Rotate a regrader seat that already voted. Be revoked. |
+| **Admin** | Set caps, the claim flow limit, the minimum bond and the house-regrader allowance (`set_limits`); window floors (`set_floors`); the smallest panel (`set_min_regraders`); the mint, sponsor and regrader allowlists, including which sponsors are house sponsors (`set_allowed`); the curator (`set_proposal_policy`); the guardian and arbiter (`set_config_role`). Lower or lift any breaker. Replace an escrow's resolver, compliance key or a regrader seat that has not voted (`rotate_role`). Retire the Config. Hand over admin in two steps. | Move tokens out of a vault. Change an open escrow's terms, total, deadlines, `refund_to` or posted result. Rotate a regrader seat that already voted. Be revoked. |
 | **Guardian** | Raise a program-wide stop for 7 days (`set_stop`), freeze one escrow for 7 days (`set_freeze`), revoke a key (`set_revoked`), and hand an undecided escrow to the arbiter (`escalate`). | Lower or lift a stop, unfreeze, unrevoke, or revoke the admin. Escalate an unchallenged result once its challenge window is over, or a dispute once its recorded quorum may settle. Move funds or pick a result. |
 | **Arbiter** | Resolve a Frozen escrow (`arbiter_resolve`) by choosing the posted result or a challenger's alternative that at least one named regrader voted for. | Write its own payout root, result hash or total. Act on any escrow that is not Frozen, or during a payout stop or a freeze. |
 | **Curator** | Co-sign a sponsor's proposal, which is how a sponsor outside the allowlist gets an escrow. Approve it exactly as submitted, or reject it with the hash of a written reason. | Change a proposal's terms (approval takes no arguments). Be the admin, guardian or arbiter, or the sponsor, resolver or compliance key of a proposal. |
@@ -218,7 +218,7 @@ On mainnet today one key holds the upgrade authority, the admin and the arbiter,
 | `set_limits` | admin | Per-escrow and global caps, claim flow limit, minimum bond, house-regrader allowance |
 | `set_floors` | admin | Window floors and reveal grace for escrows opened from now on |
 | `set_min_regraders` | admin | Smallest panel an escrow may name from now on |
-| `set_allowed` | admin | Mint, sponsor and regrader allowlists |
+| `set_allowed` | admin | Mint, sponsor and regrader allowlists, and a listed sponsor's or regrader's house mark |
 | `set_proposal_policy` | admin | Names the curator and caps the value of pending proposals |
 | **Wind-down** | | |
 | `retire` | admin | One way: no new escrows or deposits; results, claims and refunds carry on |
@@ -255,7 +255,7 @@ On mainnet today one key holds the upgrade authority, the admin and the arbiter,
 What the program enforces:
 
 - Tokens leave a vault only to a winner's own token account against the payout root in force, or to the sponsor through `refund`. No role can send them anywhere else.
-- A result pays nothing until its whole challenge window has run, at least 72 hours, even if a quorum formed early. Overturning a posted result waits for the whole attest window, at least 48 hours more.
+- A result pays nothing until its whole challenge window has run, even if a quorum formed early. That window is at least 72 hours, except in an escrow opened by a house sponsor, where it may be 0. Overturning a posted result waits for the whole attest window, at least 48 hours more.
 - Posting a result costs a bond, and so does every challenge. The side that wins takes every bond on the losing side.
 - Since 2k > n and each regrader votes once, at most one result can reach a quorum.
 - The arbiter only chooses between results that were posted or challenged, and an alternative needs at least one regrader's vote. It cannot write a result of its own.
@@ -267,6 +267,7 @@ What it trusts, and who:
 
 - **The grading runs off-chain.** The program sees hashes: the entries root, the result document, the regrade kit, the payout root. Whether a payout root matches the real scores is checked by people rerunning the grader: the regraders, and anyone who wants to challenge.
 - **The regraders are chosen by the admin.** A panel can only name keys in the admin's registry, which marks the ones make.fun runs as house keys, and the Config caps how many house keys one panel may hold. Where house keys can reach a quorum, the vote is only as independent as make.fun is. The fixed challenge and attest windows are there so the guardian and outside watchers have time to see a bad result and send it to the arbiter.
+- **A house sponsor's escrow can skip the challenge window.** The admin marks which allowlisted sponsors are house sponsors. On mainnet today that is one key, make.fun's own reward wallet, `7ycv2To2epAXAzyskv9KpXMS3Bez42q3oH9iMJk9ZRMY`. An escrow a house sponsor opens may set a challenge window of 0. Its posted result then settles with no time for anyone to challenge it or for the guardian to escalate it, so nothing on chain checks that result before it pays: it rests on the resolver make.fun runs. What still applies to it: the caps, the claim flow limit, compliance holds, and a guardian freeze or payout stop that lands before the result settles. Every other sponsor's escrow keeps the 72 hour minimum.
 - **Governance is a single key on mainnet today.** That key is the upgrade authority, the admin and the arbiter. The upgrade authority can replace the program, which would replace every rule on this page, so these guarantees hold for the deployed build only. Watch the program's last-deployed slot and verify again after any upgrade.
 - **The admin can replace an escrow's resolver, compliance key, or a regrader seat that has not voted yet.** It cannot change the terms, the money or a vote already cast, and every rotation is an on-chain event.
 - **The guardian can hold things up.** It can stop intake or payouts, or freeze one escrow, for 7 days at a time and raise it again when it lapses, until the admin lifts it or replaces the guardian. It can also revoke a key, for example a sanctioned address, and a revoked winner cannot claim.
@@ -275,7 +276,7 @@ What it trusts, and who:
 
 ## Verify it yourself
 
-The deployed program can be rebuilt byte for byte from this repository. Each commit here carries a `Source-Revision` trailer, and that is the revision the program stamps into its embedded security.txt. The mainnet program reports `source_revision` `7a5074181432387ffbe44486389477c9d05143af`, which commit `58f74cdbb5031aa6de829ee759925ab1c26fd3a3` of this repository holds.
+The deployed program can be rebuilt byte for byte from this repository. Each commit here carries a `Source-Revision` trailer, and that is the revision the program stamps into its embedded security.txt. The mainnet program reports `source_revision` `5720f415c1dc1b03a99df2f245067ad94efa5494`, which commit `aa44d41c153a117d9432eab9425bb7397c85a747` of this repository holds.
 
 You need Docker and [solana-verify](https://github.com/Ellipsis-Labs/solana-verifiable-build) 0.5.2. The build runs in the `solanafoundation/solana-verifiable-build` image for Agave 3.1.10. On Apple silicon the image runs emulated and takes a few minutes.
 
@@ -283,12 +284,12 @@ You need Docker and [solana-verify](https://github.com/Ellipsis-Labs/solana-veri
 solana-verify verify-from-repo https://github.com/makedotfun/prize-escrow \
   --url https://api.mainnet-beta.solana.com \
   --program-id sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd \
-  --commit-hash 58f74cdbb5031aa6de829ee759925ab1c26fd3a3 \
+  --commit-hash aa44d41c153a117d9432eab9425bb7397c85a747 \
   --mount-path chain \
   --library-name prize_escrow \
   --arch v2 \
   '--cargo-build-sbf-args=--tools-version v1.57' \
-  -- --config 'env.SOURCE_REVISION="7a5074181432387ffbe44486389477c9d05143af"'
+  -- --config 'env.SOURCE_REVISION="5720f415c1dc1b03a99df2f245067ad94efa5494"'
 ```
 
 After comparing the hashes it asks whether to upload the verification data on chain. You can decline; that step needs a funded keypair and changes nothing about the result.
@@ -297,10 +298,10 @@ To compare by hand instead:
 
 ```sh
 git clone https://github.com/makedotfun/prize-escrow && cd prize-escrow
-git checkout 58f74cdbb5031aa6de829ee759925ab1c26fd3a3
+git checkout aa44d41c153a117d9432eab9425bb7397c85a747
 solana-verify build chain --library-name prize_escrow --arch v2 \
   '--cargo-build-sbf-args=--tools-version v1.57' \
-  -- --config 'env.SOURCE_REVISION="7a5074181432387ffbe44486389477c9d05143af"'
+  -- --config 'env.SOURCE_REVISION="5720f415c1dc1b03a99df2f245067ad94efa5494"'
 solana-verify get-executable-hash chain/target/deploy/prize_escrow.so
 solana-verify get-program-hash -u https://api.mainnet-beta.solana.com sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd
 ```
@@ -358,7 +359,7 @@ project_url      https://make.fun
 contacts         email:security@make.fun
 policy           Report vulnerabilities privately to security@make.fun, never in a public issue or post.
 source_code      https://github.com/makedotfun/prize-escrow
-source_revision  7a5074181432387ffbe44486389477c9d05143af
+source_revision  5720f415c1dc1b03a99df2f245067ad94efa5494
 ```
 
 ## License
