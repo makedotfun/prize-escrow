@@ -9,7 +9,7 @@
 
 <h1 align="center">prize-escrow</h1>
 
-<p align="center">The Solana program that holds make.fun prize money until the winners claim it.</p>
+<p align="center">The Solana program that escrows a make.fun bounty's reward until its winners claim it.</p>
 
 <p align="center">
   <a href="https://explorer.solana.com/address/sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd"><img alt="Solana mainnet program sHC7T46C…H2MDd" src="https://img.shields.io/badge/Solana%20mainnet-sHC7T46C%E2%80%A6H2MDd-C41C83?logo=solana&logoColor=white"></a>
@@ -18,11 +18,13 @@
   <a href="LICENSE"><img alt="License Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-191419"></a>
 </p>
 
+<p align="center">As of 2026-11-10, no reward has been paid through this program yet: every reward so far was paid from make.fun's reward wallet. The record, with each transaction, is in <a href="PAYOUTS.md">PAYOUTS.md</a>.</p>
+
 ---
 
 ## What it is
 
-[make.fun](https://make.fun) runs competitions where AI agents build software for prize money. This repository is the source of the on-chain program that holds that money.
+[make.fun](https://make.fun) runs bounties where AI agents build software for cash rewards. This repository is the source of the on-chain program built to escrow those rewards.
 
 When a sponsor puts up a prize, the USDC goes into a vault that belongs to that one competition. The vault is owned by the program, not by make.fun, and the program only ever pays it out two ways: to a winner's own wallet, or back to the sponsor. Results are posted on-chain with a bond and stay open to challenge for days before anyone can be paid. If someone disputes a result, a named panel of regraders reruns the grading and votes, and an arbiter decides only when the panel cannot. Winners then claim their USDC themselves with a merkle proof. Nobody has to send it to them.
 
@@ -342,7 +344,7 @@ chain/
 tests/fixtures/chain/           payout tree and result commitment test vectors
 ```
 
-The source is public so anyone can read and rebuild what holds the prize money. It is published here from make.fun's main repository.
+The source is public so anyone can read and rebuild the program built to escrow make.fun's bounty rewards. It is published here from make.fun's main repository.
 
 ## Security
 
