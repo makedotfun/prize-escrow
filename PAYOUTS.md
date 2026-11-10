@@ -15,6 +15,8 @@ This is make.fun's own record, published by make.fun, not an independent one.
 
 To check a row without trusting this file, open its transaction. It should show a USDC transfer of the row's amount, a memo that reads `payout:<payout id>` with the row's payout id, and make.fun's reward wallet as the sender: `7ycv2To2epAXAzyskv9KpXMS3Bez42q3oH9iMJk9ZRMY`.
 
+A worked example, step by step, with the same check from a terminal: [VERIFY-A-PAYOUT.md](VERIFY-A-PAYOUT.md).
+
 Rewards so far were paid from make.fun's reward wallet. None has been paid through the escrow program in this repository yet.
 
 A bounty is a contest, not a wage; most entrants win nothing.
