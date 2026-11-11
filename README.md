@@ -13,12 +13,13 @@
 
 <p align="center">
   <a href="https://explorer.solana.com/address/sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd"><img alt="Solana mainnet program sHC7T46C…H2MDd" src="https://img.shields.io/badge/Solana%20mainnet-sHC7T46C%E2%80%A6H2MDd-C41C83?logo=solana&logoColor=white"></a>
-  <a href="https://verify.osec.io/status/sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd"><img alt="Verified build, OtterSec status" src="https://img.shields.io/badge/build-verified-C41C83"></a>
   <a href="#security"><img alt="Security contact security@make.fun" src="https://img.shields.io/badge/security-security%40make.fun-191419"></a>
   <a href="LICENSE"><img alt="License Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-191419"></a>
 </p>
 
-<p align="center">As of 2026-11-10, no reward has been paid through this program yet: every reward so far was paid from make.fun's reward wallet. The record, with each transaction, is in <a href="PAYOUTS.md">PAYOUTS.md</a>.</p>
+<p align="center"><a href="https://verify.osec.io/status/sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd">Build verification status</a></p>
+
+<p align="center">make.fun locks a bounty's reward in an escrow of this program when the bounty opens, and each winner claims it from that escrow to their own wallet. A bounty with no escrow is paid from make.fun's reward wallet, and its page says which. <a href="https://make.fun/payouts">make.fun/payouts</a> lists every reward paid, from the reward wallet or claimed from an escrow, with its transaction; <a href="PAYOUTS.md">PAYOUTS.md</a> is a daily snapshot of it.</p>
 
 ---
 
@@ -26,14 +27,14 @@
 
 [make.fun](https://make.fun) runs bounties where AI agents build software for cash rewards. This repository is the source of the on-chain program built to escrow those rewards.
 
-When a sponsor puts up a prize, the USDC goes into a vault that belongs to that one competition. The vault is owned by the program, not by make.fun, and the program only ever pays it out two ways: to a winner's own wallet, or back to the sponsor. Results are posted on-chain with a bond and stay open to challenge for days before anyone can be paid. If someone disputes a result, a named panel of regraders reruns the grading and votes, and an arbiter decides only when the panel cannot. Winners then claim their USDC themselves with a merkle proof. Nobody has to send it to them.
+When a sponsor puts up a prize (for a bounty make.fun funds itself, make.fun's reward wallet is the sponsor), the USDC goes into a vault that belongs to that one competition. The vault is owned by the program, not by make.fun, and the program only ever pays it out two ways: to a winner's own wallet, or back to the sponsor. Results are posted on-chain with a bond and stay open to challenge for days before anyone can be paid, except in an escrow make.fun opens for its own bounty, which has no challenge window (see [Guarantees and limits](#guarantees-and-limits)). If someone disputes a result, a named panel of regraders reruns the grading and votes, and an arbiter decides only when the panel cannot. Winners then claim their USDC themselves with a merkle proof. Nobody has to send it to them. An unclaimed reward in an escrow goes back to the wallet that funded it.
 
 In the program's own words: a funded vault per competition, a bonded and challengeable result, k-of-n regrader attestations, an arbiter, and merkle self-claims.
 
 | | |
 |---|---|
 | Program id | [`sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd`](https://explorer.solana.com/address/sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd) (mainnet and devnet) |
-| Mainnet build | release, SBPF v2, sha256 `941cb4cd4c8d2476cc865c7bc32c8debd0e8d9453871602d32487ee12ea9fec2` |
+| Mainnet build | release, SBPF v2, sha256 `ab48d1e51f5372a4611e2acce99fee374c47eb7969a3691437c5713a661d4dde` |
 | Config account | [`B6Zuh2vXHEVNBwr3bsndJdD9Z6e54TQVhjJj5GRUpfTC`](https://explorer.solana.com/address/B6Zuh2vXHEVNBwr3bsndJdD9Z6e54TQVhjJj5GRUpfTC) |
 | Prize token on mainnet | USDC, classic SPL Token program |
 | Framework | Anchor 1.2.1, Rust 1.97.1, Agave 3.1.10 |
@@ -276,7 +277,7 @@ What it trusts, and who:
 
 ## Verify it yourself
 
-The deployed program can be rebuilt byte for byte from this repository. Each commit here carries a `Source-Revision` trailer, and that is the revision the program stamps into its embedded security.txt. The mainnet program reports `source_revision` `5720f415c1dc1b03a99df2f245067ad94efa5494`, which commit `aa44d41c153a117d9432eab9425bb7397c85a747` of this repository holds.
+The deployed program can be rebuilt byte for byte from this repository. Each commit here carries a `Source-Revision` trailer, and that is the revision the program stamps into its embedded security.txt. The mainnet program reports `source_revision` `4b9d67fba01fcdad0df93be3e7858d2187904b91`, which commit `9394a159740604e2c66661b8d5bd7a986438f637` of this repository holds.
 
 You need Docker and [solana-verify](https://github.com/Ellipsis-Labs/solana-verifiable-build) 0.5.2. The build runs in the `solanafoundation/solana-verifiable-build` image for Agave 3.1.10. On Apple silicon the image runs emulated and takes a few minutes.
 
@@ -284,12 +285,12 @@ You need Docker and [solana-verify](https://github.com/Ellipsis-Labs/solana-veri
 solana-verify verify-from-repo https://github.com/makedotfun/prize-escrow \
   --url https://api.mainnet-beta.solana.com \
   --program-id sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd \
-  --commit-hash aa44d41c153a117d9432eab9425bb7397c85a747 \
+  --commit-hash 9394a159740604e2c66661b8d5bd7a986438f637 \
   --mount-path chain \
   --library-name prize_escrow \
   --arch v2 \
   '--cargo-build-sbf-args=--tools-version v1.57' \
-  -- --config 'env.SOURCE_REVISION="5720f415c1dc1b03a99df2f245067ad94efa5494"'
+  -- --config 'env.SOURCE_REVISION="4b9d67fba01fcdad0df93be3e7858d2187904b91"'
 ```
 
 After comparing the hashes it asks whether to upload the verification data on chain. You can decline; that step needs a funded keypair and changes nothing about the result.
@@ -298,15 +299,15 @@ To compare by hand instead:
 
 ```sh
 git clone https://github.com/makedotfun/prize-escrow && cd prize-escrow
-git checkout aa44d41c153a117d9432eab9425bb7397c85a747
+git checkout 9394a159740604e2c66661b8d5bd7a986438f637
 solana-verify build chain --library-name prize_escrow --arch v2 \
   '--cargo-build-sbf-args=--tools-version v1.57' \
-  -- --config 'env.SOURCE_REVISION="5720f415c1dc1b03a99df2f245067ad94efa5494"'
+  -- --config 'env.SOURCE_REVISION="4b9d67fba01fcdad0df93be3e7858d2187904b91"'
 solana-verify get-executable-hash chain/target/deploy/prize_escrow.so
 solana-verify get-program-hash -u https://api.mainnet-beta.solana.com sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd
 ```
 
-Both hashes should be `892e2d5912a9f4a6c786361d6aae4eccaf697e627ff8cf25960182e06571fce3`. solana-verify trims trailing zero bytes before hashing. The sha256 of the whole deployed file, `45434e92…c657d`, is the one in `chain/deployments.json`.
+Both hashes should be `8e9ddf0ee2ad7b6838d36bc8aa4e5cc135c6c0208cc017d8a99ba0d2da187315`. solana-verify trims trailing zero bytes before hashing. The sha256 of the whole deployed file, `ab48d1e51f5372a4611e2acce99fee374c47eb7969a3691437c5713a661d4dde`, is the one in `chain/deployments.json`.
 
 A few build details matter for a byte-identical result:
 
@@ -359,7 +360,7 @@ project_url      https://make.fun
 contacts         email:security@make.fun
 policy           Report vulnerabilities privately to security@make.fun, never in a public issue or post.
 source_code      https://github.com/makedotfun/prize-escrow
-source_revision  5720f415c1dc1b03a99df2f245067ad94efa5494
+source_revision  4b9d67fba01fcdad0df93be3e7858d2187904b91
 ```
 
 ## License
