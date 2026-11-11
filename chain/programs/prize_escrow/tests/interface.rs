@@ -670,7 +670,7 @@ const ERRORS: [(EscrowError, &str); 118] = [
     (EscrowError::ResolveWindowClosed, "ResolveWindowClosed"),
     (EscrowError::NotHeld, "NotHeld"),
     (EscrowError::AlreadyRequested, "AlreadyRequested"),
-    (EscrowError::FinalNotEnded, "FinalNotEnded"),
+    (EscrowError::EntriesWindowOpen, "EntriesWindowOpen"),
     (EscrowError::EntriesNotCommitted, "EntriesNotCommitted"),
     (EscrowError::ClaimWindowTooShort, "ClaimWindowTooShort"),
     (EscrowError::HardDeadlineTooEarly, "HardDeadlineTooEarly"),

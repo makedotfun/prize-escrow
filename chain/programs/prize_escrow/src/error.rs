@@ -88,8 +88,8 @@ pub enum EscrowError {
     NotHeld,
     #[msg("This claim has already been requested")]
     AlreadyRequested,
-    #[msg("The competition's final phase has not ended yet")]
-    FinalNotEnded,
+    #[msg("The entries deadline has not passed yet")]
+    EntriesWindowOpen,
     #[msg("The entries root has not been committed")]
     EntriesNotCommitted,
     #[msg("With a compliance key, the claim window must be longer than the hold window")]

@@ -41,7 +41,7 @@
   "devnet": {
     "programId": "sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd",
     "build": "test-windows",
-    "programSha256": "9309b62a9f2cc1028ef919d7677e3fb9763f48e79493c68fecab30d1c4137dd3",
+    "programSha256": "82f3c763de29836cf61f18ed3914513bd6e3d87dad3471dfeacc6a400849aa8a",
     "upgradeAuthority": "9LDrDGKnTTQsGz1aBB37VuqaiYY3zs4YsQbcoPF1uAq6",
     "governance": "squads",
     "config": "B6Zuh2vXHEVNBwr3bsndJdD9Z6e54TQVhjJj5GRUpfTC",
@@ -88,7 +88,7 @@
   "mainnet": {
     "programId": "sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd",
     "build": "release",
-    "programSha256": "941cb4cd4c8d2476cc865c7bc32c8debd0e8d9453871602d32487ee12ea9fec2",
+    "programSha256": "ab48d1e51f5372a4611e2acce99fee374c47eb7969a3691437c5713a661d4dde",
     "upgradeAuthority": "2oyHAoA7m7owTCxTdrUrZe2zkGU7R7a1jwhRnhpJPiGw",
     "governance": "single-key",
     "config": "B6Zuh2vXHEVNBwr3bsndJdD9Z6e54TQVhjJj5GRUpfTC",

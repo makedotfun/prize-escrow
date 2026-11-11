@@ -1,7 +1,7 @@
 //! make.fun prize escrow.
 //!
 //! One escrow per (sponsor, competition) holds the prize pot in a vault from open. The named
-//! resolver commits the entries root, then, once the final phase has ended, posts the payout root,
+//! resolver commits the entries root, then, from the entries deadline on, posts the payout root,
 //! the result hash and the total with a SOL bond: the escrow stores their commitment. Anyone may
 //! challenge with a bonded alternative result (hash, root and total) inside the challenge window,
 //! in two steps (a commit, then its reveal in a later slot, so a watcher cannot copy a challenge
@@ -265,9 +265,9 @@ pub mod prize_escrow {
     }
 
     /// The resolver posts the payout root, the result and kit hashes and the total with its SOL
-    /// bond, at or after final_end and before resolve_deadline, once the entries root is
-    /// committed; 0 < `total` <= the vault balance. Stores the result commitment and opens the
-    /// challenge window (Challengeable).
+    /// bond, at or after entries_deadline (final_end need not have passed) and before
+    /// resolve_deadline, once the entries root is committed; 0 < `total` <= the vault balance.
+    /// Stores the result commitment and opens the challenge window (Challengeable).
     pub fn post_result(
         ctx: Context<PostResult>,
         payout_root: [u8; 32],

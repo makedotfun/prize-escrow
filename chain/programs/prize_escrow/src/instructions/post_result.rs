@@ -45,9 +45,9 @@ pub struct PostResult<'info> {
 }
 
 /// In order, each failing with its own error: the resolver is not revoked (KeyRevoked); the
-/// escrow is Open; the final phase has ended
-/// (now >= final_end, FinalNotEnded) and resolve_deadline has not (ResolveWindowClosed); the
-/// entries root is committed (EntriesNotCommitted); the payout root and result hash are non-zero
+/// escrow is Open; the entries deadline has passed (now >= entries_deadline, EntriesWindowOpen)
+/// and resolve_deadline has not (ResolveWindowClosed); the entries root is committed
+/// (EntriesNotCommitted); the payout root and result hash are non-zero
 /// (InvalidResultHash); and 0 < total <= the vault balance (TotalMismatch).
 ///
 /// The total may be less than the vault: anyone can transfer tokens into the vault's token
@@ -82,7 +82,10 @@ pub fn handle_post_result(
         escrow.status == EscrowStatus::Open,
         EscrowError::InvalidStatus
     );
-    require!(now >= escrow.final_end, EscrowError::FinalNotEnded);
+    require!(
+        now >= escrow.entries_deadline,
+        EscrowError::EntriesWindowOpen
+    );
     require!(
         now < escrow.resolve_deadline,
         EscrowError::ResolveWindowClosed

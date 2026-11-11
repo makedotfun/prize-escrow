@@ -121,10 +121,12 @@ pub struct EscrowTerms {
     /// The SOL bond (lamports) the resolver posts with a result and a challenger posts with a
     /// challenge; at least bond_floor (BOND_FLOOR_RENTS rent-exempt minimums of an empty account).
     pub bond_lamports: u64,
-    /// Unix seconds: commit_entries must land before it (the final phase's start).
+    /// Unix seconds: commit_entries must land before it (the final phase's start), and
+    /// post_result lands at or after it, once the entries root is final.
     pub entries_deadline: i64,
-    /// Unix seconds: the final phase's end. post_result lands at or after it, never on a
-    /// competition still running.
+    /// Unix seconds: the final phase's scheduled end, which resolve_deadline and a proposal's
+    /// minimum resolve window (MIN_RESOLVE_WINDOW) are measured from; post_result does not wait
+    /// for it.
     pub final_end: i64,
     /// Unix seconds: post_result must land before it, or the pot can be refunded in full.
     pub resolve_deadline: i64,
@@ -318,7 +320,8 @@ pub struct Escrow {
     pub challenger_bond: u64,
 
     pub entries_deadline: i64,
-    /// The final phase's end: post_result lands at or after it.
+    /// The final phase's scheduled end; post_result does not wait for it (it lands at or after
+    /// entries_deadline).
     pub final_end: i64,
     pub resolve_deadline: i64,
     pub challenge_window: i64,

@@ -191,7 +191,7 @@ pub enum Step {
     Tick(u8),
     /// The honest parties react, then wall time moves to `before` (1 to BLIND) seconds of the
     /// escrow clock before one of the escrow's deadlines (challenge, reveal, attest, claim, hard,
-    /// final end, resolve), at most MAX_LATENCY ahead: the adversary moves first there.
+    /// entries, resolve), at most MAX_LATENCY ahead: the adversary moves first there.
     Approach {
         deadline: u8,
         before: u8,
@@ -1336,7 +1336,7 @@ impl Model {
                     e.attest_deadline,
                     e.claim_deadline,
                     e.hard_deadline,
-                    e.final_end,
+                    e.entries_deadline,
                     e.resolve_deadline,
                 ][usize::from(deadline) % 7];
                 let before = i64::from(before).clamp(1, BLIND);
@@ -1765,13 +1765,14 @@ impl Model {
         let w = self.world.clone();
         let honest = self.honest().clone();
 
-        // The resolver posts the honest result once the final phase is over.
+        // The resolver posts the honest result once the entries deadline has passed (the committed
+        // root is final then).
         let e = self.escrow(c);
         let now = w.escrow_now(c);
         if e.status == EscrowStatus::Open
             && self.free(c, &e.resolver)
             && e.entries_root != [0; 32]
-            && now >= e.final_end
+            && now >= e.entries_deadline
             && now < e.resolve_deadline
         {
             let key = Role::of(&e.resolver).unwrap().key();

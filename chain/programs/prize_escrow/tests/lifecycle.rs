@@ -9,7 +9,7 @@
 //! and the event the instruction emits.
 //!
 //! Run review 3's regressions live here too: two sponsors opening one competition id each at
-//! its own address, post_result waiting for final_end and the entries root, a donation into the
+//! its own address, post_result waiting for the entries deadline and root, a donation into the
 //! vault never blocking post_result or arbiter_resolve, and the terms' hard-deadline and
 //! claim-versus-hold bounds (the commitment and the late-arbiter refund are in tests/claims.rs).
 //!
@@ -87,7 +87,7 @@ const DAY: i64 = 24 * HOUR;
 /// 2027-01-15T08:00:00Z: when every test opens its escrow.
 const NOW: i64 = 1_800_000_000;
 const ENTRIES_DEADLINE: i64 = NOW + DAY;
-/// The final phase ends a day after it starts: post_result waits for it.
+/// The final phase ends a day after it starts; post_result does not wait for it.
 const FINAL_END: i64 = NOW + 2 * DAY;
 const RESOLVE_DEADLINE: i64 = NOW + 7 * DAY;
 const CLAIM_WINDOW: i64 = 30 * DAY;
@@ -1384,22 +1384,29 @@ fn post_result_holds_the_total_to_the_vault_and_takes_the_bond() {
 }
 
 #[test]
-fn post_result_waits_for_the_final_end_and_the_entries_root() {
-    // Finding 4 of run review 3: post_result took a result before the competition's final
-    // phase had ended, and with no entries root committed.
+fn post_result_waits_for_the_entries_deadline_and_the_entries_root() {
+    // Finding 4 of run review 3: post_result took a result with no entries root committed. It
+    // waits for the entries deadline, from which the committed root is final (commit_entries
+    // lands only before it, once), and never for final_end: a result judged before the final
+    // phase's scheduled end posts at once.
     let mut lc = Lc::committed();
-    lc.at(FINAL_END - 1);
+    lc.at(ENTRIES_DEADLINE - 1);
     let r = lc.post(Who::Resolver, TOTAL);
     assert_refused(
         r,
-        EscrowError::FinalNotEnded,
-        "post_result a second before the final end",
+        EscrowError::EntriesWindowOpen,
+        "post_result a second before the entries deadline",
     );
-    lc.at(FINAL_END);
+    assert_eq!(lc.state().status, EscrowStatus::Open);
+    lc.at(ENTRIES_DEADLINE);
     ok(
         lc.post(Who::Resolver, TOTAL),
-        "post_result at the final end",
+        "post_result at the entries deadline, before the final end",
     );
+    let state = lc.state();
+    assert_eq!(state.status, EscrowStatus::Challengeable);
+    assert_eq!(state.challenge_deadline, ENTRIES_DEADLINE + 24 * HOUR);
+    assert_eq!(state.final_end, FINAL_END, "post_result moves no deadline");
 
     // Never committed: no result can be posted, and once entries closed only the refund at the
     // resolve deadline is left.

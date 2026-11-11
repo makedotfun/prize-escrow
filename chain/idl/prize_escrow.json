@@ -2754,9 +2754,9 @@
       "name": "post_result",
       "docs": [
         "The resolver posts the payout root, the result and kit hashes and the total with its SOL",
-        "bond, at or after final_end and before resolve_deadline, once the entries root is",
-        "committed; 0 < `total` <= the vault balance. Stores the result commitment and opens the",
-        "challenge window (Challengeable)."
+        "bond, at or after entries_deadline (final_end need not have passed) and before",
+        "resolve_deadline, once the entries root is committed; 0 < `total` <= the vault balance.",
+        "Stores the result commitment and opens the challenge window (Challengeable)."
       ],
       "discriminator": [
         209,
@@ -5235,8 +5235,8 @@
     },
     {
       "code": 6042,
-      "name": "FinalNotEnded",
-      "msg": "The competition's final phase has not ended yet"
+      "name": "EntriesWindowOpen",
+      "msg": "The entries deadline has not passed yet"
     },
     {
       "code": 6043,
@@ -7398,7 +7398,8 @@
           {
             "name": "final_end",
             "docs": [
-              "The final phase's end: post_result lands at or after it."
+              "The final phase's scheduled end; post_result does not wait for it (it lands at or after",
+              "entries_deadline)."
             ],
             "type": "i64"
           },
@@ -7871,15 +7872,17 @@
           {
             "name": "entries_deadline",
             "docs": [
-              "Unix seconds: commit_entries must land before it (the final phase's start)."
+              "Unix seconds: commit_entries must land before it (the final phase's start), and",
+              "post_result lands at or after it, once the entries root is final."
             ],
             "type": "i64"
           },
           {
             "name": "final_end",
             "docs": [
-              "Unix seconds: the final phase's end. post_result lands at or after it, never on a",
-              "competition still running."
+              "Unix seconds: the final phase's scheduled end, which resolve_deadline and a proposal's",
+              "minimum resolve window (MIN_RESOLVE_WINDOW) are measured from; post_result does not wait",
+              "for it."
             ],
             "type": "i64"
           },
