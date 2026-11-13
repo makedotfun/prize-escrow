@@ -75,7 +75,7 @@ flowchart TD
     L --> M
 ```
 
-The deadlines are fixed when the escrow opens and checked by the program. The release build refuses an escrow whose challenge window is under 72 hours, whose attest window is under 48 hours, whose compliance hold window is under 72 hours, or whose claim window is under 7 days. One exception: an escrow opened by a sponsor the admin has marked as a house sponsor may set any challenge window from 0 up, and neither the 72 hour minimum nor the Config's floor applies to it; its other three windows keep their floors. The Config can set higher floors. The backstop is `hard_deadline`, which must be at least the resolve deadline plus every window plus 7 more days: an escrow that nobody settled, or a dispute that nobody decided, can be refunded to the sponsor after it.
+The deadlines are fixed when the escrow opens and checked by the program. The release build refuses an escrow whose challenge window, attest window or compliance hold window is under 24 hours, or whose claim window is under 7 days. The admin can set higher floors in the Config (`set_floors`) for escrows opened after the change. As of November 2026, mainnet's Config sets the floors at 24 hours for the challenge window, 48 hours for the attest window, 72 hours for the hold window and 30 days for the claim window. One exception: an escrow opened by a sponsor the admin has marked as a house sponsor may set any challenge window from 0 up, and neither the 24 hour minimum nor the Config's floor applies to it; its other three windows keep their floors. The backstop is `hard_deadline`, which must be at least the resolve deadline plus every window plus 7 more days: an escrow that nobody settled, or a dispute that nobody decided, can be refunded to the sponsor after it.
 
 ### Where the money can go
 
@@ -210,7 +210,7 @@ On mainnet today one key holds the upgrade authority, the admin and the arbiter,
 | `set_freeze` | guardian or admin to freeze, admin to unfreeze | Freezes one escrow for 7 days; its clock stops |
 | `extend_freeze` | admin | Moves the end of a freeze |
 | `escalate` | guardian or admin | Hands an undecided escrow to the arbiter (it becomes Frozen) |
-| `set_revoked` | guardian or admin to revoke, admin to unrevoke | A revoked key is refused in every role it holds |
+| `set_revoked` | guardian or admin to revoke, admin to unrevoke | A revoked key's signature is refused in every role it holds |
 | `rotate_role` | admin | Replaces an escrow's resolver, compliance key, or a regrader seat that has not voted |
 | **Config** | | |
 | `initialize_config` | upgrade authority | Creates the Config, once |
@@ -256,7 +256,7 @@ On mainnet today one key holds the upgrade authority, the admin and the arbiter,
 What the program enforces:
 
 - Tokens leave a vault only to a winner's own token account against the payout root in force, or to the sponsor through `refund`. No role can send them anywhere else.
-- A result pays nothing until its whole challenge window has run, even if a quorum formed early. That window is at least 72 hours, except in an escrow opened by a house sponsor, where it may be 0. Overturning a posted result waits for the whole attest window, at least 48 hours more.
+- A result pays nothing until its whole challenge window has run, even if a quorum formed early. That window is at least 24 hours, except in an escrow opened by a house sponsor, where it may be 0. Overturning a posted result waits for the whole attest window, at least 24 hours more in the release build and 48 hours under mainnet's current Config.
 - Posting a result costs a bond, and so does every challenge. The side that wins takes every bond on the losing side.
 - Since 2k > n and each regrader votes once, at most one result can reach a quorum.
 - The arbiter only chooses between results that were posted or challenged, and an alternative needs at least one regrader's vote. It cannot write a result of its own.
@@ -268,10 +268,10 @@ What it trusts, and who:
 
 - **The grading runs off-chain.** The program sees hashes: the entries root, the result document, the regrade kit, the payout root. Whether a payout root matches the real scores is checked by people rerunning the grader: the regraders, and anyone who wants to challenge.
 - **The regraders are chosen by the admin.** A panel can only name keys in the admin's registry, which marks the ones make.fun runs as house keys, and the Config caps how many house keys one panel may hold. Where house keys can reach a quorum, the vote is only as independent as make.fun is. The fixed challenge and attest windows are there so the guardian and outside watchers have time to see a bad result and send it to the arbiter.
-- **A house sponsor's escrow can skip the challenge window.** The admin marks which allowlisted sponsors are house sponsors. On mainnet today that is one key, make.fun's own reward wallet, `7ycv2To2epAXAzyskv9KpXMS3Bez42q3oH9iMJk9ZRMY`. An escrow a house sponsor opens may set a challenge window of 0. Its posted result then settles with no time for anyone to challenge it or for the guardian to escalate it, so nothing on chain checks that result before it pays: it rests on the resolver make.fun runs. What still applies to it: the caps, the claim flow limit, compliance holds, and a guardian freeze or payout stop that lands before the result settles. Every other sponsor's escrow keeps the 72 hour minimum.
+- **A house sponsor's escrow can skip the challenge window.** The admin marks which allowlisted sponsors are house sponsors. On mainnet today that is one key, make.fun's own reward wallet, `7ycv2To2epAXAzyskv9KpXMS3Bez42q3oH9iMJk9ZRMY`. An escrow a house sponsor opens may set a challenge window of 0. Its posted result then settles with no time for anyone to challenge it or for the guardian to escalate it, so nothing on chain checks that result before it pays: it rests on the resolver make.fun runs. What still applies to it: the caps, the claim flow limit, compliance holds, and a guardian freeze or payout stop that lands before the result settles. Every other sponsor's escrow keeps the 24 hour minimum.
 - **Governance is a single key on mainnet today.** That key is the upgrade authority, the admin and the arbiter. The upgrade authority can replace the program, which would replace every rule on this page, so these guarantees hold for the deployed build only. Watch the program's last-deployed slot and verify again after any upgrade.
 - **The admin can replace an escrow's resolver, compliance key, or a regrader seat that has not voted yet.** It cannot change the terms, the money or a vote already cast, and every rotation is an on-chain event.
-- **The guardian can hold things up.** It can stop intake or payouts, or freeze one escrow, for 7 days at a time and raise it again when it lapses, until the admin lifts it or replaces the guardian. It can also revoke a key, for example a sanctioned address, and a revoked winner cannot claim.
+- **The guardian can hold things up.** It can stop intake or payouts, or freeze one escrow, for 7 days at a time and raise it again when it lapses, until the admin lifts it or replaces the guardian. It can also revoke a key, for example a sanctioned address, and a revoked winner cannot claim. Revoking a sponsor does not hold its escrow's money: anyone may send `refund`, and it still pays a revoked sponsor once the deadlines pass, so what holds that refund is a freeze of the escrow or a payout stop.
 - **Compliance can hold a winner's claim.** A claim still held at the claim deadline goes back to the sponsor with the rest of the unclaimed prize.
 - **USDC's issuer can freeze token accounts,** a vault's included. The program refuses a frozen account by name rather than failing on a raw token error, but it cannot unfreeze one.
 
@@ -321,7 +321,7 @@ Devnet runs the same program id built with the `test-windows` feature, which low
 
 ### Run the tests
 
-The integration tests run the real program bytes on [LiteSVM](https://github.com/LiteSVM/litesvm), with the feature set pinned from mainnet, and move the clock forward so they exercise the full 72-hour and 48-hour windows. They load `chain/target/deploy/prize_escrow.so` at run time, so build it first with the `solana-verify build` command above, then:
+The integration tests run the real program bytes on [LiteSVM](https://github.com/LiteSVM/litesvm), with the feature set pinned from mainnet, and move the clock forward so they run through whole windows at the release build's minimums: 24 hours to challenge, attest and hold, and 7 days to claim. They load `chain/target/deploy/prize_escrow.so` at run time, so build it first with the `solana-verify build` command above, then:
 
 ```sh
 cd chain
