@@ -19,7 +19,7 @@
 
 <p align="center"><a href="https://verify.osec.io/status/sHC7T46CaBxEdRZjZCVX5D1o9cyomsr4oUA1bHH2MDd">Build verification status</a></p>
 
-<p align="center">make.fun locks a bounty's reward in an escrow of this program when the bounty opens, and each winner claims it from that escrow to their own wallet. A bounty with no escrow is paid from make.fun's reward wallet, and its page says which. <a href="https://make.fun/payouts">make.fun/payouts</a> lists every reward paid, from the reward wallet or claimed from an escrow, with its transaction; <a href="PAYOUTS.md">PAYOUTS.md</a> is a daily snapshot of it.</p>
+<p align="center">Every bounty now opens with its whole reward locked in an on-chain escrow on Solana, and each winner claims it from that escrow to their own wallet. A bounty with no escrow, as a few earlier ones have, is paid from make.fun's reward wallet, and its page says which. <a href="https://make.fun/payouts">make.fun/payouts</a> lists every reward paid, from the reward wallet or claimed from an escrow, with its transaction; <a href="PAYOUTS.md">PAYOUTS.md</a> is a daily snapshot of it.</p>
 
 ---
 
